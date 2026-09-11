@@ -75,7 +75,17 @@
   const form = document.getElementById("form");
   const input = document.getElementById("q");
   const send = document.getElementById("send");
+  const sampleBtns = document.querySelectorAll(".samples button");
   const messages = [];   // 대화 이력. 서버는 상태를 저장하지 않으므로 여기서 들고 있는다.
+  let busy = false;
+
+  function setBusy(v) {
+    busy = v;
+    send.disabled = v;
+    // 예제 버튼도 같이 잠근다. 안 그러면 응답 중에 눌러 두 요청이 겹치고
+    // 이력에 user 턴이 연속으로 쌓인다.
+    sampleBtns.forEach((b) => { b.disabled = v; });
+  }
 
   function addTurn(who, cls) {
     const wrap = document.createElement("div");
@@ -92,6 +102,9 @@
   }
 
   async function ask(question) {
+    if (busy) return;
+    setBusy(true);
+
     const empty = log.querySelector(".empty");
     if (empty) empty.remove();
 
@@ -100,9 +113,10 @@
 
     const out = addTurn("챗봇", "bot");
     out.textContent = "…";
-    send.disabled = true;
 
     let answer = "";
+    let reader = null;
+    let failed = false;
     try {
       const res = await fetch("/chat", {
         method: "POST",
@@ -112,7 +126,7 @@
       if (!res.ok) throw new Error("HTTP " + res.status);
 
       // SSE를 직접 파싱한다. EventSource는 GET만 지원해서 쓸 수 없다.
-      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+      reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
       let buf = "";
       while (true) {
         const { value, done } = await reader.read();
@@ -129,17 +143,27 @@
             answer += payload.text;
             out.textContent = answer;
           } else if (ev === "error") {
+            failed = true;
             out.classList.add("err");
             out.textContent = payload.message;
           }
         }
       }
-      if (answer) messages.push({ role: "model", text: answer });
     } catch (e) {
+      failed = true;
       out.classList.add("err");
       out.textContent = "요청 실패: " + e.message;
     } finally {
-      send.disabled = false;
+      // 중간에 튕겼으면 스트림을 닫아준다. 안 닫으면 서버는 아무도 안 읽는
+      // 응답을 계속 만들고 있고, is_disconnected()도 걸리지 않는다.
+      if (reader) { try { await reader.cancel(); } catch { /* 이미 닫힘 */ } }
+
+      // 답을 제대로 못 받았으면 방금 질문을 이력에서 뺀다.
+      // 남겨두면 다음 요청에 user 턴이 연속으로 들어가고, 실패한 질문이 다시 전송된다.
+      if (failed || !answer) messages.pop();
+      else messages.push({ role: "model", text: answer });
+
+      setBusy(false);
       input.focus();
     }
   }
