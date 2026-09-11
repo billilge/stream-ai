@@ -1,0 +1,29 @@
+# 가상환경
+.venv/
+venv/
+
+# 환경 변수 (API 키)
+.env
+.env.*
+!.env.example
+
+# 원본 문서 / 인덱스 (AGENTS.md 금지 사항)
+# docs/raw/는 git에 올리지 않되 로컬에서 절대 삭제하지 않는다.
+docs/raw/
+index/
+
+# 연습용 스크립트 (개인 실험용, 커밋하지 않음)
+try_*.py
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# IDE / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
