@@ -73,11 +73,26 @@ AI 서버는 인터넷에 직접 노출하지 않는다. 백엔드를 거친 요
 백엔드 팀과 합의 후 확정한다. 초안은 다음과 같다.
 
 ```
+GET /health
+  응답: { "status": "ok" }
+
 POST /chat
-  헤더: X-Internal-Token, X-User-Id
-  본문: { "question": str, "conversation_id": str }
+  헤더: X-Internal-Token, X-User-Id   (아직 미구현. 계약 확정 후 추가)
+  본문: { "messages": [ { "role": "user" | "model", "text": str } ] }
   응답: SSE 스트림
 ```
+
+SSE 이벤트는 세 종류다.
+
+```
+event: delta   data: { "text": "부분 응답" }     0회 이상 반복
+event: done    data: {}                          정상 종료
+event: error   data: { "message": "오류 안내" }   실패. 상세 원인은 서버 로그에만 남긴다
+```
+
+대화 이력은 요청마다 `messages`로 통째로 받는다. AI 서버는 대화 상태를 저장하지 않는다.
+서버가 무상태여야 재배포·장애 복구 시 진행 중이던 대화가 날아가지 않고, 인스턴스를 늘릴 때
+세션 공유 문제가 생기지 않는다. 이력 관리 주체는 백엔드다.
 
 계약이 확정되면 이 문서를 갱신한다.
 
