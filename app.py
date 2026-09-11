@@ -6,7 +6,7 @@ from typing import Literal
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
@@ -49,6 +49,16 @@ class ChatReq(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/")
+def demo():
+    """개발 중 동작 확인용 페이지.
+
+    실제 사용자는 프론트(React)를 통해 들어오므로 이 페이지는 배포 전에 제거한다.
+    파일로 열면 CORS에 막혀서, 서버가 직접 내려준다.
+    """
+    return FileResponse(Path(__file__).parent / "static" / "demo.html")
 
 
 def sse(event: str, data: dict) -> str:

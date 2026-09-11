@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>소융대 챗봇 확인용</title>
+<style>
+  :root {
+    --bg: #f4f6f8; --card: #fff; --ink: #17212b; --muted: #5c6b7a;
+    --rule: #dce3e9; --accent: #1f5c8b; --accent-soft: #e4edf4;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.6 "Malgun Gothic", system-ui, sans-serif;
+    display: flex; justify-content: center; padding: 24px 16px;
+  }
+  main { width: 100%; max-width: 720px; display: flex; flex-direction: column; gap: 16px; }
+  header h1 { margin: 0 0 4px; font-size: 18px; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  #log {
+    background: var(--card); border: 1px solid var(--rule); border-radius: 6px;
+    padding: 16px; min-height: 320px; display: flex; flex-direction: column; gap: 14px;
+  }
+  .turn { display: grid; grid-template-columns: 52px 1fr; gap: 12px; align-items: start; }
+  .who { font-size: 12px; font-weight: 700; padding-top: 3px; }
+  .turn.me .who { color: var(--muted); }
+  .turn.bot .who { color: var(--accent); }
+  .msg { margin: 0; white-space: pre-wrap; word-break: break-word; }
+  .empty { color: var(--muted); font-size: 14px; margin: 0; }
+  .err { color: #a3372b; }
+  form { display: flex; gap: 8px; }
+  input {
+    flex: 1; padding: 11px 14px; font: inherit; color: inherit;
+    border: 1px solid var(--rule); border-radius: 6px; background: var(--card);
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button {
+    padding: 11px 20px; font: inherit; font-weight: 600; cursor: pointer;
+    border: 0; border-radius: 6px; background: var(--accent); color: #fff;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  .samples { display: flex; flex-wrap: wrap; gap: 6px; }
+  .samples button {
+    background: var(--accent-soft); color: var(--accent);
+    font-size: 13px; font-weight: 500; padding: 6px 11px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>소융대 챗봇 확인용</h1>
+    <p>개발 중 동작 확인 페이지입니다. 검색은 아직 스텁이라 고정 문서 3건만 알고 있습니다.</p>
+  </header>
+
+  <div class="samples">
+    <button type="button" data-q="동아리 모집 언제까지야?">동아리 모집</button>
+    <button type="button" data-q="우산 빌릴 수 있어? 며칠까지 쓸 수 있어?">우산 대여</button>
+    <button type="button" data-q="간식 나눔 어디서 해?">간식 나눔</button>
+    <button type="button" data-q="학식 메뉴 오늘 뭐야?">모르는 질문</button>
+    <button type="button" data-q="수강신청 언제야?">학사 정보</button>
+  </div>
+
+  <div id="log"><p class="empty">질문을 입력하거나 위 버튼을 눌러보세요.</p></div>
+
+  <form id="form">
+    <input id="q" placeholder="질문을 입력하세요" autocomplete="off" required>
+    <button id="send" type="submit">보내기</button>
+  </form>
+</main>
+
+<script>
+  const log = document.getElementById("log");
+  const form = document.getElementById("form");
+  const input = document.getElementById("q");
+  const send = document.getElementById("send");
+  const messages = [];   // 대화 이력. 서버는 상태를 저장하지 않으므로 여기서 들고 있는다.
+
+  function addTurn(who, cls) {
+    const wrap = document.createElement("div");
+    wrap.className = "turn " + cls;
+    const label = document.createElement("span");
+    label.className = "who";
+    label.textContent = who;
+    const p = document.createElement("p");
+    p.className = "msg";
+    wrap.append(label, p);
+    log.append(wrap);
+    log.scrollIntoView({ block: "end" });
+    return p;
+  }
+
+  async function ask(question) {
+    const empty = log.querySelector(".empty");
+    if (empty) empty.remove();
+
+    addTurn("나", "me").textContent = question;
+    messages.push({ role: "user", text: question });
+
+    const out = addTurn("챗봇", "bot");
+    out.textContent = "…";
+    send.disabled = true;
+
+    let answer = "";
+    try {
+      const res = await fetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages }),
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+
+      // SSE를 직접 파싱한다. EventSource는 GET만 지원해서 쓸 수 없다.
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buf = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += value;
+        const blocks = buf.split("\n\n");
+        buf = blocks.pop();                       // 마지막 조각은 아직 안 끝났을 수 있다
+        for (const block of blocks) {
+          const ev = /^event: (.+)$/m.exec(block)?.[1];
+          const raw = /^data: (.+)$/m.exec(block)?.[1];
+          if (!raw) continue;
+          const payload = JSON.parse(raw);
+          if (ev === "delta") {
+            answer += payload.text;
+            out.textContent = answer;
+          } else if (ev === "error") {
+            out.classList.add("err");
+            out.textContent = payload.message;
+          }
+        }
+      }
+      if (answer) messages.push({ role: "model", text: answer });
+    } catch (e) {
+      out.classList.add("err");
+      out.textContent = "요청 실패: " + e.message;
+    } finally {
+      send.disabled = false;
+      input.focus();
+    }
+  }
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const q = input.value.trim();
+    if (!q) return;
+    input.value = "";
+    ask(q);
+  });
+
+  document.querySelectorAll(".samples button").forEach((b) => {
+    b.addEventListener("click", () => ask(b.dataset.q));
+  });
+</script>
+</body>
+</html>
