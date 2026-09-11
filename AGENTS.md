@@ -94,16 +94,22 @@ prompts/
 └── system_v1.md          시스템 프롬프트 (코드 하드코딩 금지)
 eval/
 └── golden.jsonl          평가 골든셋
-src/
-├── crawl.py              수집
-├── parse.py              HWP/PDF/HTML → 텍스트
-├── chunk.py              청킹 + 메타데이터
-├── build_index.py        인덱스 빌드
-├── search.py             검색
-├── llm.py                Gemini 호출 래퍼
-└── app.py                FastAPI 엔트리포인트
-eval.py
+crawl.py                  수집
+parse.py                  HWP/PDF/HTML → 텍스트
+chunk.py                  청킹 + 메타데이터
+build_index.py            인덱스 빌드
+search.py                 검색
+llm.py                    Gemini 호출 래퍼
+app.py                    FastAPI 엔트리포인트
+eval.py                   평가 실행
 ```
+
+파이썬 파일은 모두 저장소 루트에 둔다. `src/` 같은 하위 패키지를 만들지 않는다.
+이 저장소는 배포용 라이브러리가 아니라 직접 실행하는 서버이고, 하위 패키지를 두면
+`from search import search`가 `from src.search import search`로 바뀌면서
+import 경로 문제로 막히는 일이 잦다. 파일이 늘어 불편해지면 그때 다시 논의한다.
+
+서버 실행: `uvicorn app:app --reload`
 
 ### 모듈 경계
 
