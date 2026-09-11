@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Literal
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from google import genai
 from google.genai import types
@@ -31,6 +31,9 @@ SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "system_v1.md").read_text(
     encoding="utf-8"
 )
 
+# 개발 환경에서만 데모 페이지를 연다. 배포할 때 ENV=prod 로 둔다.
+ENV = os.getenv("ENV", "dev")
+
 app = FastAPI()
 client = genai.Client()
 
@@ -51,14 +54,17 @@ def health():
     return {"status": "ok"}
 
 
-@app.get("/")
-def demo():
-    """개발 중 동작 확인용 페이지.
-
-    실제 사용자는 프론트(React)를 통해 들어오므로 이 페이지는 배포 전에 제거한다.
-    파일로 열면 CORS에 막혀서, 서버가 직접 내려준다.
-    """
-    return FileResponse(Path(__file__).parent / "static" / "demo.html")
+if ENV != "prod":
+    # 실제 사용자는 프론트(React)를 통해 들어온다. 이 페이지는 개발 중 확인용이다.
+    # 라우트 자체를 등록하지 않으므로 ENV=prod 면 존재하지 않는다.
+    # 파일로 열면 CORS에 막혀서 서버가 직접 내려준다.
+    @app.get("/")
+    def demo():
+        path = Path(__file__).parent / "static" / "demo.html"
+        if not path.exists():
+            # 응답이 시작된 뒤 터져서 깨진 500이 나가는 것보다 명확한 404가 낫다.
+            raise HTTPException(status_code=404, detail="데모 페이지 파일이 없습니다")
+        return FileResponse(path)
 
 
 def sse(event: str, data: dict) -> str:
