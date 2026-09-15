@@ -1,8 +1,10 @@
 import json
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -111,8 +113,15 @@ async def relay(req: Request, messages: list[Msg]):
             types.Content(role=m.role, parts=[types.Part(text=m.text)])
             for m in messages
         ]
+        # 모델은 오늘이 며칠인지 모른다. 알려주지 않으면 유효기간이 지났는지 짐작으로 답한다.
+        # 서버가 해외 리전에 떠도 날짜가 하루 밀리지 않게 한국 시간으로 계산한다.
+        today = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
         config = types.GenerateContentConfig(
-            system_instruction=f"{SYSTEM_PROMPT}\n\n# 참고 문서\n\n{build_context(docs)}"
+            system_instruction=(
+                f"{SYSTEM_PROMPT}\n\n"
+                f"오늘 날짜: {today}\n\n"
+                f"# 참고 문서\n\n{build_context(docs)}"
+            )
         )
 
         stream = await client.aio.models.generate_content_stream(
