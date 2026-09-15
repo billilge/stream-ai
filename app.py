@@ -73,6 +73,55 @@ def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+class BubbleSplitter:
+    """스트리밍 텍스트를 문단(빈 줄) 단위 말풍선으로 나눈다.
+
+    프론트가 빈 줄을 직접 찾게 하면 불안정하다. 스트림 조각이 "\n" 하나에서 끊기면
+    빈 줄인지 아닌지 알 수 없기 때문이다. 그래서 서버가 조각을 이어 붙여 보면서
+    문단이 바뀌는 지점에 bubble 이벤트를 따로 보낸다. 프론트는 이 이벤트만 보고 말풍선을 나눈다.
+    """
+
+    def __init__(self):
+        self.buf = ""            # 아직 내보내지 않은 텍스트
+        self.has_text = False    # 지금까지 한 글자라도 내보냈는지
+        self.need_bubble = False # 다음 글자를 내보내기 전에 말풍선을 나눠야 하는지
+
+    def _emit(self, text: str) -> list[str]:
+        if self.need_bubble:
+            # 새 문단의 앞쪽 줄바꿈은 버린다. 말풍선이 빈 줄로 시작하지 않게 한다.
+            text = text.lstrip("\n")
+        if not text:
+            return []
+        events = []
+        if self.need_bubble and self.has_text:
+            events.append(sse("bubble", {}))
+        self.need_bubble = False
+        self.has_text = True
+        events.append(sse("delta", {"text": text}))
+        return events
+
+    def feed(self, text: str) -> list[str]:
+        """모델이 보낸 조각을 받아 지금 내보낼 수 있는 SSE 이벤트를 돌려준다."""
+        self.buf += text
+        events = []
+        while "\n\n" in self.buf:
+            para, self.buf = self.buf.split("\n\n", 1)
+            events += self._emit(para)
+            if self.has_text:
+                self.need_bubble = True
+        # 끝의 줄바꿈은 다음 조각과 합쳐 빈 줄이 될 수 있어 붙잡아 둔다.
+        keep = len(self.buf) - len(self.buf.rstrip("\n"))
+        if keep < len(self.buf):
+            events += self._emit(self.buf[: len(self.buf) - keep])
+            self.buf = self.buf[len(self.buf) - keep :]
+        return events
+
+    def flush(self) -> list[str]:
+        """스트림이 끝났을 때 남은 텍스트를 내보낸다. 끝의 줄바꿈은 버린다."""
+        rest, self.buf = self.buf.rstrip("\n"), ""
+        return self._emit(rest)
+
+
 def build_context(docs: list[dict]) -> str:
     """검색된 문서를 프롬프트에 넣을 형태로 바꾼다.
 
@@ -129,11 +178,15 @@ async def relay(req: Request, messages: list[Msg]):
             contents=contents,
             config=config,
         )
+        splitter = BubbleSplitter()
         async for chunk in stream:
             if await req.is_disconnected():
                 break
             if chunk.text:
-                yield sse("delta", {"text": chunk.text})
+                for event in splitter.feed(chunk.text):
+                    yield event
+        for event in splitter.flush():
+            yield event
         yield sse("done", {})
     except Exception:
         # 상세 원인은 서버 로그에만 남긴다.

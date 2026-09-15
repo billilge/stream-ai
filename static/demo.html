@@ -27,6 +27,8 @@
   .turn.me .who { color: var(--muted); }
   .turn.bot .who { color: var(--accent); }
   .msg { margin: 0; white-space: pre-wrap; word-break: break-word; }
+  .bubbles { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  .turn.bot .msg { background: var(--accent-soft); padding: 8px 12px; border-radius: 10px; }
   .empty { color: var(--muted); font-size: 14px; margin: 0; }
   .err { color: #a3372b; }
   form { display: flex; gap: 8px; }
@@ -93,12 +95,23 @@
     const label = document.createElement("span");
     label.className = "who";
     label.textContent = who;
+    // 말풍선이 여러 개여도 이름표는 하나만 둔다. 말풍선은 bubbles 안에 쌓인다.
+    const bubbles = document.createElement("div");
+    bubbles.className = "bubbles";
     const p = document.createElement("p");
     p.className = "msg";
-    wrap.append(label, p);
+    bubbles.append(p);
+    wrap.append(label, bubbles);
     log.append(wrap);
     log.scrollIntoView({ block: "end" });
     return p;
+  }
+
+  // **굵게** 만 굵은 글씨로 바꾼다. 먼저 < > & 를 이스케이프해서
+  // 답변에 HTML이 섞여 있어도 태그로 실행되지 않게 한다.
+  function renderBold(el, text) {
+    const safe = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    el.innerHTML = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   }
 
   async function ask(question) {
@@ -114,7 +127,9 @@
     const out = addTurn("챗봇", "bot");
     out.textContent = "…";
 
-    let answer = "";
+    let out_ = out;        // 지금 글자를 채우고 있는 말풍선
+    let bubbleText = "";   // 지금 말풍선의 텍스트
+    let answer = "";       // 이력에 넣을 전체 답변. 말풍선끼리는 빈 줄로 잇는다
     let reader = null;
     let failed = false;
     try {
@@ -141,11 +156,18 @@
           const payload = JSON.parse(raw);
           if (ev === "delta") {
             answer += payload.text;
-            out.textContent = answer;
+            bubbleText += payload.text;
+            renderBold(out_, bubbleText);
+          } else if (ev === "bubble") {
+            answer += "\n\n";
+            bubbleText = "";
+            out_ = document.createElement("p");
+            out_.className = "msg";
+            out.parentElement.append(out_);
           } else if (ev === "error") {
             failed = true;
-            out.classList.add("err");
-            out.textContent = payload.message;
+            out_.classList.add("err");
+            out_.textContent = payload.message;
           }
         }
       }
