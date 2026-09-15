@@ -29,7 +29,7 @@ if not MODEL:
 
 # 프롬프트는 코드에 문자열로 넣지 않고 파일에서 읽는다.
 # 비개발자가 말투를 고칠 수 있어야 하기 때문이다. 수정하면 서버를 다시 띄워야 반영된다.
-SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "system_v1.md").read_text(
+SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "system_v2.md").read_text(
     encoding="utf-8"
 )
 
