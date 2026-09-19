@@ -1,0 +1,17 @@
+{
+  "_source": "API (사물함) — 실시간 잔여 수량·개인 신청 정보",
+  "period": {
+    "semester": "2026-2",
+    "apply_start": "2026-09-01 10:00", "apply_end": "2026-09-12 23:59",
+    "extra_apply_start": "2026-09-28 10:00", "extra_apply_end": "2026-09-30 23:59",
+    "use_until": "2027-02-28",
+    "apply_method": "Stream > 사물함 탭 > 구역 선택 후 신청 (선착순)",
+    "cancel_method": "Stream > 사물함 탭 > 내 사물함 > 반납하기",
+    "fee": {"학생회비 납부자": 0, "미납자": 5000}
+  },
+  "zones": [
+    {"zone_id": "A", "building": "미래관", "floor": "3층", "location_desc": "엘리베이터 옆 복도", "total": 60, "occupied": 58, "note": "전공 강의실과 가장 가까움"},
+    {"zone_id": "B", "building": "미래관", "floor": "4층", "location_desc": "학생회실 맞은편", "total": 60, "occupied": 52, "note": "빌릴게 수령처와 같은 층"},
+    {"zone_id": "C", "building": "미래관", "floor": "5층", "location_desc": "세미나실 앞", "total": 40, "occupied": 40, "note": "만석"}
+  ]
+}
