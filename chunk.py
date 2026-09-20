@@ -60,13 +60,15 @@ def _split_blocks(text: str) -> list[tuple[str, str]]:
 
 
 def _is_rule(text: str) -> bool:
-    """조항 단위로 잘라야 하는 문서인지 본문으로만 판단한다.
+    """조항 단위로 잘라야 하는 문서인지 본문 전체로 판단한다.
 
     문서유형 이름은 보지 않는다. 학생회 기본 문서는 "회칙"이고 학칙·세칙도 있어서
     이름에 "규정"이 들어가야 한다고 걸면 정작 조항으로 된 문서들이 빠진다.
     AGENTS.md 규칙도 문서 이름이 아니라 `제N조(제목)` 패턴을 기준으로 삼는다.
 
     조항이 둘 이상일 때만 분할한다. 하나뿐이면 조항 구조가 아니라 인용일 가능성이 높다.
+    표로 나뉜 블록 하나가 아니라 문서 전체를 받아야 한다. 블록 단위로 세면
+    규정 중간에 표가 있을 때 표 뒤 블록의 조항 수가 모자라 판정이 뒤집힌다.
     """
     return sum(1 for _ in _ARTICLE_HEAD.finditer(text)) >= 2
 
@@ -173,8 +175,8 @@ def chunk(doc: dict) -> list[dict]:
 
     Args:
         doc: {"text": 본문, "meta": {문서ID, 출처URL, 제목, 게시일, 유효기간, 문서유형}}
-             본문에 `제N조(제목)` 꼴이 둘 이상이면 조항 단위로, 그 외에는 500~800자로 자른다.
-             문서유형 이름은 보지 않는다.
+             본문 전체에 `제N조(제목)` 꼴이 둘 이상이면 조항 단위로,
+             그 외에는 500~800자로 자른다. 문서유형 이름은 보지 않는다.
 
     Returns:
         [{"text": 청크 본문, "meta": {...META_KEYS, 청크번호, 청크수}}, ...]
@@ -188,11 +190,15 @@ def chunk(doc: dict) -> list[dict]:
     if not text:
         return []
 
+    # 판정은 문서 전체로 한 번만 한다. 블록마다 따로 보면 규정 중간에 표가 있을 때
+    # 표 뒤 블록에 조항이 하나뿐이라 글자 수로 잘린다. 조항은 자르지 않는 게 규칙이다.
+    rule = _is_rule(text)
+
     pieces: list[str] = []
     for kind, body in _split_blocks(text):
         if kind == "표":
             pieces.append(body.strip())
-        elif _is_rule(body):
+        elif rule:
             pieces += _split_articles(body)
         else:
             pieces += _window(body)
