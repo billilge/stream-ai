@@ -14,6 +14,11 @@ import re
 
 # AGENTS.md "청킹 규칙". 공지는 500~800자에 앞뒤 100자를 겹친다.
 # 겹치는 이유는 문단 경계에서 잘린 문장이 어느 청크에서도 온전하지 않게 되는 것을 막기 위해서다.
+#
+# 실제 공지는 이 기준에 거의 닿지 않는다. 2026-09-20 실측으로 카톡 공지가 360자,
+# 목업 공지 12건이 71~230자였다. 그래도 기준을 낮추지 않는다. 지금 공지는 "신청 기간",
+# "참가비"처럼 짧은 항목이 나열된 형태라, 쪼개면 한 질문에 필요한 항목이 서로 다른
+# 청크로 갈라져 반쪽 답이 나간다. 긴 공지가 올 때를 위한 안전망으로 남겨둔다.
 MIN_CHARS = 500
 MAX_CHARS = 800
 OVERLAP = 100
@@ -48,6 +53,16 @@ def _split_blocks(text: str) -> list[tuple[str, str]]:
             blocks.append((kind, line))
     # 공백만 남은 블록은 버린다. 표 앞뒤의 빈 줄이 글 블록으로 잡히기 때문이다.
     return [(kind, body) for kind, body in blocks if body.strip()]
+
+
+def _is_rule(doc_type: str, text: str) -> bool:
+    """조항 단위로 잘라야 하는 문서인지 본다.
+
+    문서유형만 보지 않는 이유는 두 가지다. "학생회 규정"처럼 이름이 늘어날 수 있고,
+    반대로 유형이 규정인데 본문에 조항이 없으면 통째로 한 덩어리가 되어 검색이 안 된다.
+    이름과 본문이 모두 맞을 때만 조항 분할을 쓰고, 아니면 글자 수로 자른다.
+    """
+    return "규정" in doc_type and _ARTICLE_HEAD.search(text) is not None
 
 
 def _split_articles(text: str) -> list[str]:
@@ -123,7 +138,8 @@ def chunk(doc: dict) -> list[dict]:
 
     Args:
         doc: {"text": 본문, "meta": {문서ID, 출처URL, 제목, 게시일, 유효기간, 문서유형}}
-             `문서유형`이 "규정"이면 조항 단위로, 그 외에는 500~800자로 자른다.
+             `문서유형`에 "규정"이 들어가고 본문에 `제N조`가 있으면 조항 단위로,
+             그 외에는 500~800자로 자른다.
 
     Returns:
         [{"text": 청크 본문, "meta": {...META_KEYS, 청크번호, 청크수}}, ...]
@@ -141,7 +157,7 @@ def chunk(doc: dict) -> list[dict]:
     for kind, body in _split_blocks(text):
         if kind == "표":
             pieces.append(body.strip())
-        elif meta["문서유형"] == "규정":
+        elif _is_rule(meta["문서유형"], body):
             pieces += _split_articles(body)
         else:
             pieces += _window(body)
