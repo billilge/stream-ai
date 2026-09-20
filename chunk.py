@@ -31,7 +31,11 @@ _TABLE_LINE = re.compile(r"^\s*\|")
 
 # 규정은 문자 수로 자르지 않는다. "제3조 2항"처럼 조항 번호로 인용되는 문서라
 # 조항 중간에서 끊기면 인용이 깨진다.
-_ARTICLE_HEAD = re.compile(r"(?=^제\s*\d+\s*조)", re.MULTILINE)
+#
+# 줄 맨 앞이면서 조문 제목 괄호가 따라오는 것만 조항으로 본다. 괄호 조건이 없으면
+# "제2조제2항에 따라 시행한다"처럼 조문을 인용하며 시작하는 문장에서도 잘린다.
+# `제3조의2(제목)`처럼 가지 조항도 받는다.
+_ARTICLE_HEAD = re.compile(r"(?=^제\s*\d+\s*조(?:의\s*\d+)?\s*\()", re.MULTILINE)
 
 # 문단 경계가 없을 때 차선으로 쓰는 문장 끝. 한국어 종결어미는 마침표로 끝나므로
 # 마침표 뒤 공백(줄바꿈 포함)만 봐도 충분하다.
@@ -55,14 +59,16 @@ def _split_blocks(text: str) -> list[tuple[str, str]]:
     return [(kind, body) for kind, body in blocks if body.strip()]
 
 
-def _is_rule(doc_type: str, text: str) -> bool:
-    """조항 단위로 잘라야 하는 문서인지 본다.
+def _is_rule(text: str) -> bool:
+    """조항 단위로 잘라야 하는 문서인지 본문으로만 판단한다.
 
-    문서유형만 보지 않는 이유는 두 가지다. "학생회 규정"처럼 이름이 늘어날 수 있고,
-    반대로 유형이 규정인데 본문에 조항이 없으면 통째로 한 덩어리가 되어 검색이 안 된다.
-    이름과 본문이 모두 맞을 때만 조항 분할을 쓰고, 아니면 글자 수로 자른다.
+    문서유형 이름은 보지 않는다. 학생회 기본 문서는 "회칙"이고 학칙·세칙도 있어서
+    이름에 "규정"이 들어가야 한다고 걸면 정작 조항으로 된 문서들이 빠진다.
+    AGENTS.md 규칙도 문서 이름이 아니라 `제N조(제목)` 패턴을 기준으로 삼는다.
+
+    조항이 둘 이상일 때만 분할한다. 하나뿐이면 조항 구조가 아니라 인용일 가능성이 높다.
     """
-    return "규정" in doc_type and _ARTICLE_HEAD.search(text) is not None
+    return sum(1 for _ in _ARTICLE_HEAD.finditer(text)) >= 2
 
 
 def _split_articles(text: str) -> list[str]:
@@ -70,26 +76,54 @@ def _split_articles(text: str) -> list[str]:
     return [part.strip() for part in _ARTICLE_HEAD.split(text) if part.strip()]
 
 
-def _find_break(text: str, start: int) -> int:
+def _find_break(text: str, start: int) -> tuple[int, bool]:
     """`start`에서 시작하는 청크를 어디서 끊을지 고른다.
 
     500자 지점부터 800자 지점 사이에서 문단 경계를 먼저 찾고, 없으면 문장 끝을 찾는다.
     둘 다 없으면 800자에서 자른다. 표 없는 긴 한 문단이면 어쩔 수 없다.
+
+    Returns:
+        (끊을 위치, 그 위치가 문단·문장 경계인지). 경계가 아니면 강제 절단이다.
     """
     lo, hi = start + MIN_CHARS, start + MAX_CHARS
     window = text[lo:hi]
 
     paragraph = window.rfind("\n\n")
     if paragraph != -1:
-        return lo + paragraph + 2
+        return lo + paragraph + 2, True
 
     last = -1
     for match in _SENTENCE_END.finditer(window):
         last = match.end()
     if last != -1:
-        return lo + last
+        return lo + last, True
 
-    return hi
+    return hi, False
+
+
+def _snap_start(text: str, back: int, end: int) -> int:
+    """겹치는 구간의 시작을 줄·문장, 없으면 어절 경계로 맞춘다.
+
+    겹침을 글자 수로만 되감으면 다음 청크가 단어 중간에서 시작한다. 잘린 문장을
+    막으려고 겹치는 건데 되감으면서 다시 문장을 자르는 셈이다. 되감은 100자 안에서
+    가장 이른 경계를 골라, 겹치는 양은 최대한 지키면서 시작은 깨끗하게 만든다.
+
+    강제 절단으로 끊은 자리도 똑같이 맞춘다. 그 구간엔 줄·문장 경계가 없으므로
+    어절 경계까지 내려가는데, 단어 한가운데에서 시작하는 것보다는 낫다.
+    """
+    window = text[back:end]
+
+    starts = [back + m.end() for m in re.finditer(r"\n+", window)]
+    starts += [back + m.end() for m in _SENTENCE_END.finditer(window)]
+    starts = [s for s in starts if back <= s < end]
+    if starts:
+        return min(starts)
+
+    # 문장 경계가 없는 구간이면 어절 경계에라도 맞춘다. 단어 한가운데에서
+    # 시작하는 것보다는 낫다. 마침표 없이 이어지는 목록형 본문이 여기 걸린다.
+    words = [back + m.end() for m in re.finditer(r"\s+", window)]
+    words = [s for s in words if back <= s < end]
+    return min(words) if words else back
 
 
 def _window(text: str) -> list[str]:
@@ -108,10 +142,11 @@ def _window(text: str) -> list[str]:
         if len(text) - start <= MAX_CHARS:
             chunks.append(text[start:].strip())
             break
-        end = _find_break(text, start)
+        end, _ = _find_break(text, start)
         chunks.append(text[start:end].strip())
         # max로 감싸 진행을 보장한다. 겹침 때문에 start가 뒤로 가면 무한 반복이 된다.
-        start = max(end - OVERLAP, start + 1)
+        back = max(end - OVERLAP, start + 1)
+        start = _snap_start(text, back, end)
     return [piece for piece in chunks if piece]
 
 
@@ -138,8 +173,8 @@ def chunk(doc: dict) -> list[dict]:
 
     Args:
         doc: {"text": 본문, "meta": {문서ID, 출처URL, 제목, 게시일, 유효기간, 문서유형}}
-             `문서유형`에 "규정"이 들어가고 본문에 `제N조`가 있으면 조항 단위로,
-             그 외에는 500~800자로 자른다.
+             본문에 `제N조(제목)` 꼴이 둘 이상이면 조항 단위로, 그 외에는 500~800자로 자른다.
+             문서유형 이름은 보지 않는다.
 
     Returns:
         [{"text": 청크 본문, "meta": {...META_KEYS, 청크번호, 청크수}}, ...]
@@ -157,7 +192,7 @@ def chunk(doc: dict) -> list[dict]:
     for kind, body in _split_blocks(text):
         if kind == "표":
             pieces.append(body.strip())
-        elif _is_rule(meta["문서유형"], body):
+        elif _is_rule(body):
             pieces += _split_articles(body)
         else:
             pieces += _window(body)
