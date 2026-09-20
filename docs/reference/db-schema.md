@@ -225,12 +225,17 @@ GET /api/notices?updatedAfter=2026-09-01T00:00:00&includeDeleted=true
 ### 응답 형식
 
 DB 스키마만으로는 답이 나오지 않는 항목이다. 백엔드가 Spring이라 컬럼명과 JSON 필드명이
-다를 수 있고, 그 차이는 `sync.py`가 흡수해야 한다.
+다르고, 그 차이는 `sync.py`가 흡수한다.
 
-- [ ] JSON 필드명이 snake_case(`notice_id`)인지 camelCase(`noticeId`)인지.
-      Jackson 기본 설정이 camelCase라 DB 컬럼명과 다를 가능성이 높다
-- [ ] 날짜·시간 포맷. ISO8601(`2026-09-04T18:00:00+09:00`)인지, 타임존을 포함하는지
-- [ ] 조회 엔드포인트 주소
+- [x] **JSON 필드명은 camelCase** (2026-09-20 확인).
+      DB 컬럼 `notice_id` → 응답 `noticeId`, `apply_end_at` → `applyEndAt`,
+      `recruit_status` → `recruitStatus`, `is_deleted` → `isDeleted`.
+      **가짜 API 응답도 camelCase로 만든다.** 목업의 존재 이유가 진짜 API가 나왔을 때
+      주소만 바꾸는 것이므로, 목업이 DB 컬럼명을 쓰면 교체 시점에 `sync.py`를 다시 써야 한다
+- [x] **날짜·시간은 ISO8601** (2026-09-20 확인). 예: `2026-09-04T18:00:00`
+- [ ] 조회 엔드포인트 주소 — 아직 모름. 3주차 `sync.py` 전까지 필요하다
+
+아래 표는 **DB 컬럼 기준**이다. API 응답 필드명은 위 규칙대로 camelCase로 바꿔 읽는다.
 
 ### 조회 범위
 
