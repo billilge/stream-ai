@@ -1,0 +1,20 @@
+{
+  "_source": "API (개인별 데이터) — 로그인 사용자 기준",
+  "users": [
+    {
+      "user_id": "U-001", "name": "테스트유저", "admission_year": 22, "department": "소프트웨어학부",
+      "student_fee_paid": true,
+      "locker": {"zone_id": "B", "number": 17, "building": "미래관", "floor": "4층", "location_desc": "학생회실 맞은편", "status": "사용중"},
+      "event_applications": [
+        {"event_id": "EVT-003", "applied_at": "2026-09-16 10:05", "status": "신청완료"},
+        {"event_id": "EVT-004", "applied_at": "2026-09-15 21:40", "sport": "농구", "status": "신청완료"},
+        {"event_id": "EVT-005", "applied_at": "2026-09-09 13:12", "status": "행사취소됨"}
+      ],
+      "rentals": []
+    },
+    {
+      "user_id": "U-002", "name": "사물함없는유저", "admission_year": 25, "department": "인공지능학부",
+      "student_fee_paid": false, "locker": null, "event_applications": [], "rentals": []
+    }
+  ]
+}

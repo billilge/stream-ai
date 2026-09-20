@@ -1,0 +1,12 @@
+{
+  "_source": "링크 리다이렉트 — 학교 공식 정보. 챗봇은 내용을 단정하지 않고 링크만 안내",
+  "_note": "URL은 전부 자리표시자. 실제 학교 페이지 주소로 교체 필요",
+  "links": [
+    {"id": "LNK-01", "topic": "졸업요건", "keywords": ["졸업", "졸업요건", "졸업학점", "학번별"], "title": "학번별 졸업요건 안내", "url": "https://example.com/kmu/graduation-requirements"},
+    {"id": "LNK-02", "topic": "조기졸업", "keywords": ["조기졸업"], "title": "조기졸업 신청 자격 및 절차", "url": "https://example.com/kmu/early-graduation"},
+    {"id": "LNK-03", "topic": "개인 이수현황", "keywords": ["남은 학점", "이수현황", "내 학점"], "title": "종합정보시스템 졸업자가진단", "url": "https://example.com/kmu/self-check"},
+    {"id": "LNK-04", "topic": "학사일정", "keywords": ["학사일정", "학사 일정", "수강신청", "중간고사"], "title": "학사일정", "url": "https://example.com/kmu/academic-calendar"},
+    {"id": "LNK-05", "topic": "장학금", "keywords": ["장학금", "장학"], "title": "장학 공지 및 신청", "url": "https://example.com/kmu/scholarship"},
+    {"id": "LNK-06", "topic": "부전공·복수전공", "keywords": ["부전공", "복수전공", "다전공"], "title": "다전공 신청 안내", "url": "https://example.com/kmu/minor"}
+  ]
+}
