@@ -1,17 +1,10 @@
 {
-  "_source": "API (사물함) — 실시간 잔여 수량·개인 신청 정보",
-  "period": {
-    "semester": "2026-2",
-    "apply_start": "2026-09-01 10:00", "apply_end": "2026-09-12 23:59",
-    "extra_apply_start": "2026-09-28 10:00", "extra_apply_end": "2026-09-30 23:59",
-    "use_until": "2027-02-28",
-    "apply_method": "Stream > 사물함 탭 > 구역 선택 후 신청 (선착순)",
-    "cancel_method": "Stream > 사물함 탭 > 내 사물함 > 반납하기",
-    "fee": {"학생회비 납부자": 0, "미납자": 5000}
-  },
+  "_source": "API (사물함) — lockers · locker_periods, 구역별 잔여 수량",
+  "_note": "목업 규칙: 필드명 camelCase, 날짜 ISO8601(+09:00), 이름은 db-schema.md 컬럼명 기준. camelCase·ISO8601·boolean 표현은 Spring Jackson 기본값을 근거로 한 가정이며 서준 확인 전. lockers·locker_periods 컬럼은 db-schema.md에 상세가 없어 필드명은 임시. 인증 없이 조회 가능한지는 db-schema 5절 확인 항목.",
+  "period": {"semester": "2026-2", "applyStartAt": "2026-09-01T10:00:00+09:00", "applyEndAt": "2026-09-12T23:59:00+09:00", "extraApplyStartAt": "2026-09-28T10:00:00+09:00", "extraApplyEndAt": "2026-09-30T23:59:00+09:00", "useUntil": "2027-02-28", "applyMethod": "Stream > 사물함 탭 > 구역 선택 후 신청 (선착순)", "cancelMethod": "Stream > 사물함 탭 > 내 사물함 > 반납하기", "fee": {"paidMember": 0, "unpaidMember": 5000}},
   "zones": [
-    {"zone_id": "A", "building": "미래관", "floor": "3층", "location_desc": "엘리베이터 옆 복도", "total": 60, "occupied": 58, "note": "전공 강의실과 가장 가까움"},
-    {"zone_id": "B", "building": "미래관", "floor": "4층", "location_desc": "학생회실 맞은편", "total": 60, "occupied": 52, "note": "빌릴게 수령처와 같은 층"},
-    {"zone_id": "C", "building": "미래관", "floor": "5층", "location_desc": "세미나실 앞", "total": 40, "occupied": 40, "note": "만석"}
+    {"zoneId": "A", "building": "미래관", "floor": "3층", "locationDesc": "엘리베이터 옆 복도", "total": 60, "occupied": 58, "note": "전공 강의실과 가장 가까움"},
+    {"zoneId": "B", "building": "미래관", "floor": "4층", "locationDesc": "학생회실 맞은편", "total": 60, "occupied": 52, "note": "빌릴게 수령처와 같은 층"},
+    {"zoneId": "C", "building": "미래관", "floor": "5층", "locationDesc": "세미나실 앞", "total": 40, "occupied": 40, "note": "만석"}
   ]
 }

@@ -1,20 +1,14 @@
 {
-  "_source": "API (빌릴게) — 실시간 재고",
-  "service": {
-    "access": "Stream 웹 > 빌릴게 메뉴 (별도 앱 설치 없음, 모바일은 브라우저 '홈 화면에 추가'로 앱처럼 사용)",
-    "pickup_location": "미래관 4층 학생회실",
-    "hours": "평일 10:00~17:00 (주말·공휴일 휴무)",
-    "max_rental_days": 3,
-    "rental_flow": "Stream 빌릴게에서 예약 → 학생회실 방문 수령(학생증 확인) → 기한 내 학생회실 반납",
-    "overdue_policy": "연체 1일당 3일 대여 제한"
-  },
+  "_source": "API (빌릴게) — items 테이블, 실시간 재고",
+  "_note": "목업 규칙: 필드명 camelCase, 날짜 ISO8601(+09:00), 이름은 db-schema.md 컬럼명 기준. camelCase·ISO8601·boolean 표현은 Spring Jackson 기본값을 근거로 한 가정이며 서준 확인 전. items의 PK는 스키마상 id. count는 '지금 빌릴 수 있는 수량'으로 가정(db-schema 5절 확인 항목). 이전 목업의 total(전체 보유 수)은 스키마에 없어 제거. service는 스키마 밖의 이용 안내(RAG용 문서 성격).",
+  "service": {"access": "Stream 웹 > 빌릴게 메뉴 (별도 앱 설치 없음, 모바일은 브라우저 '홈 화면에 추가'로 앱처럼 사용)", "pickupLocation": "미래관 4층 학생회실", "hours": "평일 10:00~17:00 (주말·공휴일 휴무)", "maxRentalDays": 3, "rentalFlow": "Stream 빌릴게에서 예약 → 학생회실 방문 수령(학생증 확인) → 기한 내 학생회실 반납", "overduePolicy": "연체 1일당 3일 대여 제한"},
   "items": [
-    {"item_id": "BL-01", "name": "우산", "total": 30, "available": 22},
-    {"item_id": "BL-02", "name": "보조배터리", "total": 15, "available": 4},
-    {"item_id": "BL-03", "name": "C타입 충전기", "total": 10, "available": 7},
-    {"item_id": "BL-04", "name": "멀티탭", "total": 8, "available": 8},
-    {"item_id": "BL-05", "name": "공학용 계산기", "total": 10, "available": 0},
-    {"item_id": "BL-06", "name": "HDMI 케이블", "total": 6, "available": 6},
-    {"item_id": "BL-07", "name": "노트북 거치대", "total": 5, "available": 3}
+    {"id": 1, "name": "우산", "type": "RENTAL", "count": 22, "imageKey": null},
+    {"id": 2, "name": "보조배터리", "type": "RENTAL", "count": 4, "imageKey": null},
+    {"id": 3, "name": "C타입 충전기", "type": "RENTAL", "count": 7, "imageKey": null},
+    {"id": 4, "name": "멀티탭", "type": "RENTAL", "count": 8, "imageKey": null},
+    {"id": 5, "name": "공학용 계산기", "type": "RENTAL", "count": 0, "imageKey": null},
+    {"id": 6, "name": "HDMI 케이블", "type": "RENTAL", "count": 6, "imageKey": null},
+    {"id": 7, "name": "노트북 거치대", "type": "RENTAL", "count": 3, "imageKey": null}
   ]
 }
