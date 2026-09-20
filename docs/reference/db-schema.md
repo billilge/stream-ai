@@ -13,8 +13,8 @@
 | 경로 | 테이블 | 이유 |
 | --- | --- | --- |
 | **RAG 인덱싱** | `notices`, `events`, `archives`, `archive_related_links`, `items`(품목 목록), `open_feedbacks` | 글 덩어리. "뭐라고 써 있어?" 류 |
-| **실시간 조회** | `items.count`, `rental_histories` | 수량·상태가 계속 바뀜. 인덱싱하면 틀린 답이 나감 |
-| **제외 (인증 필요)** | `members`, `event_applications`, `locker_applications`, `student_fees`, `payers`, `chat_messages`, `notifications` | 개인 데이터. 8주 범위 밖 |
+| **실시간 조회** | `items.count`, `rental_histories`, `lockers`·`locker_periods`(구역별 잔여 수량·신청 기간) | 수량·상태가 계속 바뀜. 인덱싱하면 틀린 답이 나감 |
+| **제외 (인증 필요)** | `members`, `event_applications`, `locker_applications`, `student_fees`, `payers`, `chat_messages`, `notifications` | 개인 데이터. 6주 범위 밖. 사물함도 "내 사물함 위치"만 제외하고 구역별 잔여 수량은 위 실시간 조회로 다룬다 |
 | **제외 (내부 운영)** | `work_schedules`, `admin_config_values`, `display_*`, `rental_status_worker_logs` | 학생 대상 질문과 무관 |
 
 같은 테이블도 질문에 따라 갈린다.
@@ -32,14 +32,14 @@
 
 **2. 학년도·학기 필드가 없다** ⚠️
 `notices`에 대상 학년도/학기 컬럼이 **존재하지 않는다.**
-7주차 "지난 학기 공지 거르기"를 `created_at`만으로 처리해야 한다.
+3주차 "지난 학기 공지 거르기"를 `created_at`만으로 처리해야 한다.
 
 대응 방안 (택1, 서준과 협의 필요):
 - (a) 백엔드에 컬럼 추가 요청 — 근본 해결이지만 마이그레이션 필요
 - (b) 청킹 단계에서 제목·본문에서 "2026-2학기" 등을 정규식 추출 → 메타데이터에 저장
 - (c) `created_at` 기준 N개월 이상 지난 공지는 답변 시 "오래된 공지" 경고 부착
 
-현실적으로 **(b) + (c) 조합**이 8주 안에 가능하다.
+현실적으로 **(b) + (c) 조합**이 6주 안에 가능하다.
 
 **3. FK 제약이 없다**
 참조는 모두 논리 관계. 무결성은 애플리케이션이 보장한다.
@@ -111,7 +111,7 @@
 "지금 신청 가능?"은 `apply_end_at`과 현재 시각을 비교하는 쪽이 안전하다.
 
 **RAG vs 실시간 경계**: 행사 소개글은 RAG, "이번 주 행사 목록"은 날짜 기반 조회.
-같은 테이블이지만 질문 유형이 다르다. 6주차 function calling 설계 시 구분할 것.
+같은 테이블이지만 질문 유형이 다르다. 4주차 function calling 설계 시 구분할 것.
 
 ### archives — 학생회 활동 아카이브
 
@@ -142,7 +142,7 @@
 
 **이 테이블이 두 경로로 갈리는 지점이다.**
 - 품목 목록·이용 안내 → RAG 인덱싱 OK
-- `count` (재고) → 매번 백엔드 조회. 6주차 function calling 대상
+- `count` (재고) → 매번 백엔드 조회. 4주차 function calling 대상
 
 `count`를 인덱싱하면 "우산 3개 남음"이라고 답했는데 실제로 0개인 상황이 나온다.
 발표 장면 2("재고를 바꾼 뒤 다시 물으면 답이 바뀐다")가 이 구분에 걸려 있다.
@@ -161,7 +161,7 @@
 | `is_deleted` | TINYINT(1) | **필수 필터** |
 
 이미 Q&A 형태라 RAG에 잘 맞는다. `answer IS NULL`인 행은 제외.
-단, 로드맵 8주 범위에서는 제외 항목("데이터가 아직 없음")이므로 우선순위 낮음.
+단, 로드맵 6주 범위에서는 제외 항목("데이터가 아직 없음")이므로 우선순위 낮음.
 
 ---
 
@@ -169,7 +169,7 @@
 
 ### items.count — 재고
 
-6주차 function calling 대상. Gemini tool로 노출할 함수 형태 (제안):
+4주차 function calling 대상. Gemini tool로 노출할 함수 형태 (제안):
 
 ```python
 def get_item_stock(item_name: str) -> dict:
@@ -183,14 +183,14 @@ def get_item_stock(item_name: str) -> dict:
 | 컬럼 | 비고 |
 | --- | --- |
 | `rental_status` | CANCEL / CONFIRMED / PENDING / REJECTED / RENTAL / RETURNED / RETURN_CONFIRMED / RETURN_PENDING (8종) |
-| `member_id` | **개인 데이터 → 8주 범위 제외** |
+| `member_id` | **개인 데이터 → 6주 범위 제외** |
 
 "내 대여 현황"은 인증이 필요해서 제외. 단 집계는 가능할 수 있다
 (예: "우산은 보통 얼마나 대여되나요") — 필요성 낮으므로 후순위.
 
 ---
 
-## 4. sync.py 설계 메모 (6주차)
+## 4. sync.py 설계 메모 (3주차)
 
 ### 증분 동기화 쿼리 모양
 
@@ -214,7 +214,7 @@ GET /api/notices?updatedAfter=2026-09-01T00:00:00&includeDeleted=true
 
 `archives`, `items`는 `is_deleted`가 없어 하드 삭제 가능성이 있다.
 증분 동기화로는 감지 불가 → 주기적 전체 ID 대조가 필요할 수 있다.
-8주 범위에서는 수동 재빌드로 충분.
+6주 범위에서는 수동 재빌드로 충분.
 
 ---
 
@@ -234,7 +234,11 @@ DB 스키마만으로는 답이 나오지 않는 항목이다. 백엔드가 Spri
       **가짜 API 응답도 이 가정을 따른다.** 목업의 존재 이유가 진짜 API가 나왔을 때 주소만
       바꾸는 것이므로, 목업이 DB 컬럼명을 쓰면 교체 시점에 `sync.py`를 다시 써야 한다.
       가정이 틀리면 목업 필드명을 한 번 더 고치면 된다. 3주차 `sync.py` 전까지는 확정해야 한다
-- [ ] **날짜·시간 포맷** — 서준 확인 필요. ISO8601(`2026-09-04T18:00:00`)로 **가정**한다
+- [ ] **날짜·시간 포맷과 타임존** — 서준 확인 필요. ISO8601로 **가정**한다.
+      타임존까지 물어야 한다. `app.py`는 오늘 날짜를 `Asia/Seoul` 기준으로 계산해
+      프롬프트에 넣는데, 응답이 타임존 없는 `2026-09-04T18:00:00`이면 `applyEndAt`과
+      현재 시각을 비교할 때 기준이 어긋난다. 오프셋을 붙여 주는 쪽(`+09:00`)이 안전하다.
+      가짜 API도 같은 규칙으로 만든다
 - [ ] **조회 엔드포인트 주소** — 공지·행사·재고를 어느 URL로 요청하는지.
       3주차 `sync.py`가 실제로 호출해야 하므로 그 전까지 필요하다
 
