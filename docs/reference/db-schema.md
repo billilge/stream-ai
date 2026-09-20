@@ -227,13 +227,16 @@ GET /api/notices?updatedAfter=2026-09-01T00:00:00&includeDeleted=true
 DB 스키마만으로는 답이 나오지 않는 항목이다. 백엔드가 Spring이라 컬럼명과 JSON 필드명이
 다르고, 그 차이는 `sync.py`가 흡수한다.
 
-- [x] **JSON 필드명은 camelCase** (2026-09-20 확인).
-      DB 컬럼 `notice_id` → 응답 `noticeId`, `apply_end_at` → `applyEndAt`,
-      `recruit_status` → `recruitStatus`, `is_deleted` → `isDeleted`.
-      **가짜 API 응답도 camelCase로 만든다.** 목업의 존재 이유가 진짜 API가 나왔을 때
-      주소만 바꾸는 것이므로, 목업이 DB 컬럼명을 쓰면 교체 시점에 `sync.py`를 다시 써야 한다
-- [x] **날짜·시간은 ISO8601** (2026-09-20 확인). 예: `2026-09-04T18:00:00`
-- [ ] 조회 엔드포인트 주소 — 아직 모름. 3주차 `sync.py` 전까지 필요하다
+- [ ] **JSON 필드명이 camelCase인지** — 서준 확인 필요.
+      우리는 camelCase로 **가정하고** 진행한다(2026-09-20). Spring의 Jackson 기본 설정이
+      camelCase라 DB 컬럼 `notice_id`가 응답에서 `noticeId`로 나올 가능성이 높다.
+      `apply_end_at` → `applyEndAt`, `recruit_status` → `recruitStatus`, `is_deleted` → `isDeleted`.
+      **가짜 API 응답도 이 가정을 따른다.** 목업의 존재 이유가 진짜 API가 나왔을 때 주소만
+      바꾸는 것이므로, 목업이 DB 컬럼명을 쓰면 교체 시점에 `sync.py`를 다시 써야 한다.
+      가정이 틀리면 목업 필드명을 한 번 더 고치면 된다. 3주차 `sync.py` 전까지는 확정해야 한다
+- [ ] **날짜·시간 포맷** — 서준 확인 필요. ISO8601(`2026-09-04T18:00:00`)로 **가정**한다
+- [ ] **조회 엔드포인트 주소** — 공지·행사·재고를 어느 URL로 요청하는지.
+      3주차 `sync.py`가 실제로 호출해야 하므로 그 전까지 필요하다
 
 아래 표는 **DB 컬럼 기준**이다. API 응답 필드명은 위 규칙대로 camelCase로 바꿔 읽는다.
 
