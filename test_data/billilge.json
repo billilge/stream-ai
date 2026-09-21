@@ -1,6 +1,6 @@
 {
   "_source": "API (빌릴게) — items 테이블, 실시간 재고",
-  "_note": "목업 규칙: 필드명 camelCase, 날짜 ISO8601(오프셋 없음, LocalDateTime), 이름은 db-schema.md 컬럼명 기준. camelCase·ISO8601·boolean 표현은 Spring Jackson 기본값을 근거로 한 가정이며 서준 확인 전. items 응답 필드는 billilge/backend ItemDetail.kt 기준(itemId·itemName·itemType·count·imageUrl). count는 '지금 빌릴 수 있는 수량'으로 가정(db-schema 5절 확인 항목). 이전 목업의 total(전체 보유 수)은 스키마에 없어 제거. service는 스키마 밖의 이용 안내(RAG용 문서 성격).",
+  "_note": "목업 규칙: 필드명 camelCase, 날짜 ISO8601(오프셋 없음, LocalDateTime), 이름은 db-schema.md 컬럼명 기준. camelCase·ISO8601·boolean 표현은 Spring Jackson 기본값을 근거로 한 가정이며 서준 확인 전. items 응답 필드는 billilge/backend ItemDetail.kt 기준(itemId·itemName·itemType·count·imageUrl). count는 '지금 빌릴 수 있는 수량'으로 가정(db-schema 5절 확인 항목). 이전 목업의 total(전체 보유 수)은 스키마에 없어 제거. service는 스키마 밖의 이용 안내(RAG용 문서 성격). 빌릴게는 stream-server와 달리 껍데기가 없다. GET /items가 {items:[...]} 를 그대로 내려준다. service 블록은 실제 API에 없는 이용 안내다. AGENTS.md 데이터 분류상 문서형(RAG)이므로 2주차에 docs/seed/로 옮긴다. 그때 이 블록은 이 파일에서 뺀다.",
   "service": {"access": "Stream 웹 > 빌릴게 메뉴 (별도 앱 설치 없음, 모바일은 브라우저 '홈 화면에 추가'로 앱처럼 사용)", "pickupLocation": "미래관 4층 학생회실", "hours": "평일 10:00~17:00 (주말·공휴일 휴무)", "maxRentalDays": 3, "rentalFlow": "Stream 빌릴게에서 예약 → 학생회실 방문 수령(학생증 확인) → 기한 내 학생회실 반납", "overduePolicy": "연체 1일당 3일 대여 제한"},
   "items": [
     {"itemId": 1, "itemName": "우산", "itemType": "RENTAL", "count": 22, "imageUrl": null},

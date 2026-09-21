@@ -1,6 +1,6 @@
 {
   "_source": "API (사물함) — lockers · locker_periods, 구역별 잔여 수량",
-  "_note": "목업 규칙: 필드명 camelCase, 날짜 ISO8601(오프셋 없음, LocalDateTime), 이름은 db-schema.md 컬럼명 기준. camelCase·ISO8601·boolean 표현은 Spring Jackson 기본값을 근거로 한 가정이며 서준 확인 전. lockers·locker_periods 컬럼은 db-schema.md에 상세가 없어 필드명은 임시. 인증 없이 조회 가능한지는 db-schema 5절 확인 항목.",
+  "_note": "목업 규칙: 필드명 camelCase, 날짜 ISO8601(오프셋 없음, LocalDateTime), 이름은 db-schema.md 컬럼명 기준. camelCase·ISO8601·boolean 표현은 Spring Jackson 기본값을 근거로 한 가정이며 서준 확인 전. lockers·locker_periods 컬럼은 db-schema.md에 상세가 없어 필드명은 임시. 인증 없이 조회 가능한지는 db-schema 5절 확인 항목. stream-server에 lockers 관련 컨트롤러가 아직 없어 껍데기 모양을 확인하지 못했다. 나오면 맞춘다.",
   "period": {"semester": "2026-2", "applyStartAt": "2026-09-01T10:00:00", "applyEndAt": "2026-09-12T23:59:00", "extraApplyStartAt": "2026-09-28T10:00:00", "extraApplyEndAt": "2026-09-30T23:59:00", "useUntil": "2027-02-28", "applyMethod": "Stream > 사물함 탭 > 구역 선택 후 신청 (선착순)", "cancelMethod": "Stream > 사물함 탭 > 내 사물함 > 반납하기", "fee": {"paidMember": 0, "unpaidMember": 5000}},
   "zones": [
     {"zoneId": "A", "building": "미래관", "floor": "3층", "locationDesc": "엘리베이터 옆 복도", "total": 60, "occupied": 58, "note": "전공 강의실과 가장 가까움"},
