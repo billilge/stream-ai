@@ -1,5 +1,5 @@
 {
-  "reference_now": "2026-09-19T12:00:00+09:00",
+  "reference_now": "2026-09-19T12:00:00",
   "test_user": "U-001",
   "_note": "reference_now를 시스템 프롬프트의 현재 시각으로 고정해야 '이번달/임박/지났는지' 테스트가 재현됨. expected는 답변에 들어가야 할 핵심 사실. 문서 참조는 db-schema의 doc_id 형식({table}-{pk}). isDeleted=true 행(event-9, notice-13)이 답변에 섞이면 실패하도록 must_not에 반영. #32·#53은 인증 범위라 skip. 이 파일은 API 목업이 아니라 eval 입력이라 키 이름은 그대로 둔다.",
   "cases": [

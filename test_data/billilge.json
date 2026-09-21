@@ -1,14 +1,14 @@
 {
   "_source": "API (빌릴게) — items 테이블, 실시간 재고",
-  "_note": "목업 규칙: 필드명 camelCase, 날짜 ISO8601(+09:00), 이름은 db-schema.md 컬럼명 기준. camelCase·ISO8601·boolean 표현은 Spring Jackson 기본값을 근거로 한 가정이며 서준 확인 전. items의 PK는 스키마상 id. count는 '지금 빌릴 수 있는 수량'으로 가정(db-schema 5절 확인 항목). 이전 목업의 total(전체 보유 수)은 스키마에 없어 제거. service는 스키마 밖의 이용 안내(RAG용 문서 성격).",
+  "_note": "목업 규칙: 필드명 camelCase, 날짜 ISO8601(오프셋 없음, LocalDateTime), 이름은 db-schema.md 컬럼명 기준. camelCase·ISO8601·boolean 표현은 Spring Jackson 기본값을 근거로 한 가정이며 서준 확인 전. items 응답 필드는 billilge/backend ItemDetail.kt 기준(itemId·itemName·itemType·count·imageUrl). count는 '지금 빌릴 수 있는 수량'으로 가정(db-schema 5절 확인 항목). 이전 목업의 total(전체 보유 수)은 스키마에 없어 제거. service는 스키마 밖의 이용 안내(RAG용 문서 성격).",
   "service": {"access": "Stream 웹 > 빌릴게 메뉴 (별도 앱 설치 없음, 모바일은 브라우저 '홈 화면에 추가'로 앱처럼 사용)", "pickupLocation": "미래관 4층 학생회실", "hours": "평일 10:00~17:00 (주말·공휴일 휴무)", "maxRentalDays": 3, "rentalFlow": "Stream 빌릴게에서 예약 → 학생회실 방문 수령(학생증 확인) → 기한 내 학생회실 반납", "overduePolicy": "연체 1일당 3일 대여 제한"},
   "items": [
-    {"id": 1, "name": "우산", "type": "RENTAL", "count": 22, "imageKey": null},
-    {"id": 2, "name": "보조배터리", "type": "RENTAL", "count": 4, "imageKey": null},
-    {"id": 3, "name": "C타입 충전기", "type": "RENTAL", "count": 7, "imageKey": null},
-    {"id": 4, "name": "멀티탭", "type": "RENTAL", "count": 8, "imageKey": null},
-    {"id": 5, "name": "공학용 계산기", "type": "RENTAL", "count": 0, "imageKey": null},
-    {"id": 6, "name": "HDMI 케이블", "type": "RENTAL", "count": 6, "imageKey": null},
-    {"id": 7, "name": "노트북 거치대", "type": "RENTAL", "count": 3, "imageKey": null}
+    {"itemId": 1, "itemName": "우산", "itemType": "RENTAL", "count": 22, "imageUrl": null},
+    {"itemId": 2, "itemName": "보조배터리", "itemType": "RENTAL", "count": 4, "imageUrl": null},
+    {"itemId": 3, "itemName": "C타입 충전기", "itemType": "RENTAL", "count": 7, "imageUrl": null},
+    {"itemId": 4, "itemName": "멀티탭", "itemType": "RENTAL", "count": 8, "imageUrl": null},
+    {"itemId": 5, "itemName": "공학용 계산기", "itemType": "RENTAL", "count": 0, "imageUrl": null},
+    {"itemId": 6, "itemName": "HDMI 케이블", "itemType": "RENTAL", "count": 6, "imageUrl": null},
+    {"itemId": 7, "itemName": "노트북 거치대", "itemType": "RENTAL", "count": 3, "imageUrl": null}
   ]
 }
