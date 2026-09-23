@@ -106,6 +106,11 @@
 | `capacity` | INT | 정원 |
 | `recruit_status` | VARCHAR(30) | BEFORE_OPEN / OPEN / CLOSED |
 | `is_deleted` | TINYINT(1) | **필수 필터** |
+| `is_published` | TINYINT(1) | **필수 필터**. 기본값 `0` (V5 마이그레이션에서 추가) |
+
+**행사는 필터가 두 개다**: 목록 API가 `is_deleted = 0 AND is_published = 1`로 거른다.
+`is_published` 기본값이 `0`이라 발행하지 않은 행사는 나오지 않는다. 행사 수가 예상보다
+적게 오면 이 컬럼을 먼저 의심한다.
 
 **주의**: `recruit_status`와 `apply_end_at`이 어긋날 수 있다 (배치가 늦게 돌면).
 "지금 신청 가능?"은 `apply_end_at`과 현재 시각을 비교하는 쪽이 안전하다.
@@ -288,15 +293,41 @@ val count: Int, val imageUrl: String
 
 **`recruitStatus`는 `BEFORE_OPEN` / `OPEN` / `CLOSED` 셋뿐이다.** 취소 상태가 없다.
 
-**응답에 `isDeleted`가 없다.** 백엔드가 이미 걸러서 주는 것으로 보이지만 확인이 필요하다.
+**삭제 필터는 백엔드가 한다.** 응답 DTO에 `isDeleted`가 없고, 조회 쿼리가 직접 거른다.
+
+```java
+// NoticeJpaRepository
+WHERE n.isDeleted = false
+
+// EventJpaRepository
+WHERE e.isDeleted = false
+AND e.isPublished = true
+```
+
+**행사에는 필터가 두 개다.** `is_published`는 스키마 문서 초안에 없던 컬럼이다.
+
+```sql
+-- V5__add_is_published_to_events.sql
+ALTER TABLE events ADD COLUMN is_published TINYINT(1) NOT NULL DEFAULT 0;
+```
+
+**기본값이 `0`이라 발행하지 않은 행사는 목록에 나오지 않는다.** 우리는 목록 API만 쓰므로
+따로 걸 필요가 없지만, 행사 수가 예상보다 적게 오면 이 컬럼을 먼저 의심한다.
+
+그래서 우리 쪽 `is_deleted` 필터는 **안전망으로만** 둔다. 백엔드를 거치지 않는 경로(가짜 API,
+시드 문서)가 있는 동안에는 여전히 필요하다.
+
+### 확정된 정책 (2026-09-23, 서준 확인)
+
+- [x] **AI 서버가 `/v1/app/` 아래를 그대로 호출한다.** 서버 간 전용 엔드포인트를 따로 내지 않는다
+- [x] **서버 간 인증은 서준이 붙인다.** 방식은 아직 정해지지 않았다.
+      3주차 `sync.py`가 실제 호출을 하기 전까지 형태를 받아야 한다
+- [x] **삭제 필터는 백엔드가 한다** (저장소 확인). 서준도 확답을 주지 못했으나 쿼리로 확인됐다
 
 ### 남은 질문
 
-- [ ] AI 서버가 `/v1/app/` 아래를 그대로 호출해도 되는지, 서버 간 전용 엔드포인트를 따로 낼지.
-      지금 열려 있는 건 학생 앱용 API다
-- [ ] 서버 간 인증 방식. `X-Internal-Token` 같은 흔적이 저장소에 아직 없다
-- [ ] `isDeleted`를 백엔드가 걸러서 주는 게 맞는지. 맞다면 우리 쪽 삭제 필터는 안전망으로만 둔다
-- [ ] 취소된 행사는 어떻게 표현되는지. `recruitStatus`에 값이 없다
+- [ ] 취소된 행사는 어떻게 표현되는지. `recruitStatus`에 `BEFORE_OPEN` / `OPEN` / `CLOSED`뿐이다.
+      `is_published`를 0으로 내려 목록에서 빼는 방식일 수도 있다
 - [ ] `notices`에 대상 학년도·학기 컬럼 추가 가능 여부 (불가하면 정규식 추출로 우회)
 - [ ] `events.recruit_status` 갱신 주기 (배치인지 실시간인지)
 - [ ] `archives`, `items` 하드 삭제 여부
