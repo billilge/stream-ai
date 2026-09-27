@@ -1,8 +1,8 @@
 {
   "_source": "API (개인별 데이터) — 로그인 사용자 기준. 인증 헤더 확정 후 사용",
-  "_note": "목업 규칙: 필드명 camelCase, 날짜 ISO8601(+09:00), 이름은 db-schema.md 컬럼명 기준. camelCase·ISO8601·boolean 표현은 Spring Jackson 기본값을 근거로 한 가정이며 서준 확인 전. 개인 데이터라 6주 범위에서는 쓰지 않는다. eventApplications.status 값은 스키마에 정의가 없어 임시.",
+  "_note": "목업 규칙: 필드명 camelCase, 날짜 ISO8601(오프셋 없음, LocalDateTime), 이름은 db-schema.md 컬럼명 기준. camelCase·ISO8601·boolean 표현은 Spring Jackson 기본값을 근거로 한 가정이며 서준 확인 전. 개인 데이터라 6주 범위에서는 쓰지 않는다. eventApplications.status 값은 스키마에 정의가 없어 임시.",
   "users": [
-    {"userId": "U-001", "name": "테스트유저", "admissionYear": 22, "department": "소프트웨어학부", "studentFeePaid": true, "locker": {"zoneId": "B", "number": 17, "building": "미래관", "floor": "4층", "locationDesc": "학생회실 맞은편", "status": "사용중"}, "eventApplications": [{"eventId": 3, "appliedAt": "2026-09-16T10:05:00+09:00", "status": "신청완료"}, {"eventId": 4, "appliedAt": "2026-09-15T21:40:00+09:00", "sport": "농구", "status": "신청완료"}, {"eventId": 5, "appliedAt": "2026-09-09T13:12:00+09:00", "status": "행사취소됨"}], "rentals": []},
+    {"userId": "U-001", "name": "테스트유저", "admissionYear": 22, "department": "소프트웨어학부", "studentFeePaid": true, "locker": {"zoneId": "B", "number": 17, "building": "미래관", "floor": "4층", "locationDesc": "학생회실 맞은편", "status": "사용중"}, "eventApplications": [{"eventId": 3, "appliedAt": "2026-09-16T10:05:00", "status": "신청완료"}, {"eventId": 4, "appliedAt": "2026-09-15T21:40:00", "sport": "농구", "status": "신청완료"}, {"eventId": 5, "appliedAt": "2026-09-09T13:12:00", "status": "행사취소됨"}], "rentals": []},
     {"userId": "U-002", "name": "사물함없는유저", "admissionYear": 25, "department": "인공지능학부", "studentFeePaid": false, "locker": null, "eventApplications": [], "rentals": []}
   ]
 }
