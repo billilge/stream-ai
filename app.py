@@ -146,6 +146,25 @@ def build_context(docs: list[dict]) -> str:
     return "\n\n".join(blocks)
 
 
+def build_system_instruction(docs: list[dict], today: str | None = None) -> str:
+    """모델에 넘길 시스템 지시문을 조립한다.
+
+    `today`를 인자로 받는 이유는 평가 때문이다. 골든셋은 기준 시각을 고정해 두고
+    "이번 달 행사" 같은 상대 날짜 질문을 재현하는데, 함수 안에서 현재 시각을 직접
+    계산하면 밖에서 고정할 수가 없다. 그렇다고 `eval.py`가 프롬프트를 따로 조립하면
+    실제 코드와 다른 것을 평가하게 된다.
+
+    기본값은 한국 시간 기준 오늘이다. 서버가 해외 리전에 떠도 날짜가 하루 밀리지 않는다.
+    """
+    if today is None:
+        today = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
+    return (
+        f"{SYSTEM_PROMPT}\n\n"
+        f"오늘 날짜: {today}\n\n"
+        f"# 참고 문서\n\n{build_context(docs)}"
+    )
+
+
 async def relay(req: Request, messages: list[Msg]):
     # 검색부터 전부 try 안에서 한다.
     # StreamingResponse는 이 함수가 돌기 전에 이미 200과 헤더를 보냈기 때문에,
@@ -163,14 +182,8 @@ async def relay(req: Request, messages: list[Msg]):
             for m in messages
         ]
         # 모델은 오늘이 며칠인지 모른다. 알려주지 않으면 유효기간이 지났는지 짐작으로 답한다.
-        # 서버가 해외 리전에 떠도 날짜가 하루 밀리지 않게 한국 시간으로 계산한다.
-        today = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
         config = types.GenerateContentConfig(
-            system_instruction=(
-                f"{SYSTEM_PROMPT}\n\n"
-                f"오늘 날짜: {today}\n\n"
-                f"# 참고 문서\n\n{build_context(docs)}"
-            )
+            system_instruction=build_system_instruction(docs)
         )
 
         stream = await client.aio.models.generate_content_stream(

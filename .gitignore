@@ -31,3 +31,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 평가 실행 결과 (점수표는 노션·PR에 남긴다)
+eval/run-*.json
