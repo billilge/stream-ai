@@ -130,8 +130,18 @@ def _covered(need: str, answer: str) -> bool:
     toks = _tokens(need)
     if not toks:
         return False
-    hit = sum(1 for t in toks if t in answer)
-    return hit / len(toks) >= _MATCH_RATIO
+
+    # 숫자는 하나라도 틀리면 틀린 답이다. 전부 70%로 재면 "9/21 23:59"를 요구하는
+    # 문항에서 "9/21 23:50"이 넷 중 셋을 맞혀 통과한다. 마감 시각이 틀린 답을
+    # 정답으로 세면 그 지표는 쓸 수 없다. 낱말만 비율로 보고 숫자는 전부 요구한다.
+    nums = [t for t in toks if t.isdigit()]
+    words = [t for t in toks if not t.isdigit()]
+
+    if any(n not in answer for n in nums):
+        return False
+    if not words:
+        return True
+    return sum(1 for w in words if w in answer) / len(words) >= _MATCH_RATIO
 
 
 def grade_answer(row: dict, answer: str) -> dict:
