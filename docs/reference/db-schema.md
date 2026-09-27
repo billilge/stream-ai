@@ -106,6 +106,11 @@
 | `capacity` | INT | 정원 |
 | `recruit_status` | VARCHAR(30) | BEFORE_OPEN / OPEN / CLOSED |
 | `is_deleted` | TINYINT(1) | **필수 필터** |
+| `is_published` | TINYINT(1) | **필수 필터**. 기본값 `0` (V5 마이그레이션에서 추가) |
+
+**행사는 필터가 두 개다**: 목록 API가 `is_deleted = 0 AND is_published = 1`로 거른다.
+`is_published` 기본값이 `0`이라 발행하지 않은 행사는 나오지 않는다. 행사 수가 예상보다
+적게 오면 이 컬럼을 먼저 의심한다.
 
 **주의**: `recruit_status`와 `apply_end_at`이 어긋날 수 있다 (배치가 늦게 돌면).
 "지금 신청 가능?"은 `apply_end_at`과 현재 시각을 비교하는 쪽이 안전하다.
@@ -218,52 +223,118 @@ GET /api/notices?updatedAfter=2026-09-01T00:00:00&includeDeleted=true
 
 ---
 
-## 5. 서준에게 확인할 것
+## 5. API 계약
 
-백엔드에 물어볼 것은 이 목록으로 모은다. 로드맵에 흩어져 있던 백엔드 항목도 여기로 옮겼다.
+2026-09-21에 백엔드 저장소를 직접 읽어 대부분을 확정했다. 두 곳 모두 public이라 물어보지 않고
+응답 DTO와 컨트롤러를 그대로 확인할 수 있었다.
 
-### 응답 형식
+- `billilge/stream-server` — 공지·행사 (Java, Spring)
+- `billilge/backend` — 빌릴게 재고 (Kotlin, Spring). **별도 저장소이고 응답 모양도 다르다**
 
-DB 스키마만으로는 답이 나오지 않는 항목이다. 백엔드가 Spring이라 컬럼명과 JSON 필드명이
-다르고, 그 차이는 `sync.py`가 흡수한다.
+### 확인된 것
 
-- [ ] **JSON 필드명이 camelCase인지** — 서준 확인 필요.
-      우리는 camelCase로 **가정하고** 진행한다(2026-09-20). Spring의 Jackson 기본 설정이
-      camelCase라 DB 컬럼 `notice_id`가 응답에서 `noticeId`로 나올 가능성이 높다.
-      `apply_end_at` → `applyEndAt`, `recruit_status` → `recruitStatus`, `is_deleted` → `isDeleted`.
-      **가짜 API 응답도 이 가정을 따른다.** 목업의 존재 이유가 진짜 API가 나왔을 때 주소만
-      바꾸는 것이므로, 목업이 DB 컬럼명을 쓰면 교체 시점에 `sync.py`를 다시 써야 한다.
-      가정이 틀리면 목업 필드명을 한 번 더 고치면 된다. 3주차 `sync.py` 전까지는 확정해야 한다
-- [ ] **날짜·시간 포맷과 타임존** — 서준 확인 필요. ISO8601로 **가정**한다.
-      타임존까지 물어야 한다. `app.py`는 오늘 날짜를 `Asia/Seoul` 기준으로 계산해
-      프롬프트에 넣는데, 응답이 타임존 없는 `2026-09-04T18:00:00`이면 `applyEndAt`과
-      현재 시각을 비교할 때 기준이 어긋난다. 오프셋을 붙여 주는 쪽(`+09:00`)이 안전하다.
-      가짜 API도 같은 규칙으로 만든다
-- [ ] **조회 엔드포인트 주소** — 공지·행사·재고를 어느 URL로 요청하는지.
-      3주차 `sync.py`가 실제로 호출해야 하므로 그 전까지 필요하다
+**필드명은 camelCase다.** Jackson naming strategy를 설정한 곳이 없어 기본값이 그대로 적용된다.
 
-아래 표는 **DB 컬럼 기준**이다. API 응답 필드명은 위 규칙대로 camelCase로 바꿔 읽는다.
+```java
+// NoticeListItemResponse.java
+Long noticeId, String title, NoticeCategory category,
+LocalDateTime createdAt, String thumbnailUrl, boolean pinned
 
-### 조회 범위
+// EventListItemResponse.java
+Long eventId, String title, String target,
+LocalDateTime eventStartAt, String thumbnailUrl,
+LocalDateTime applyStartAt, LocalDateTime applyEndAt,
+RecruitStatus recruitStatus, Integer daysUntilDeadline
+```
 
-- [ ] 조회 API에 `updatedAfter` 필터 제공 가능 여부
-- [ ] 삭제된 항목을 동기화에 포함하는 방법 (`includeDeleted` 파라미터 등).
-      응답에 `is_deleted`가 실려 오는지, 아니면 백엔드가 이미 걸러서 주는지
-- [ ] `archives`, `items` 하드 삭제 여부
-- [ ] 사물함 구역별 잔여 수량을 인증 없이 조회할 수 있는지.
-      `lockers` · `locker_periods`에서 구역별 전체 수와 사용 중인 수를 받고 싶다
+```kotlin
+// ItemDetail.kt (빌릴게)
+val itemId: Long, val itemName: String, val itemType: ItemType,
+val count: Int, val imageUrl: String
+```
 
-### 필드 의미
+빌릴게는 이름 필드가 `name`이 아니라 **`itemName`**이다.
 
-- [ ] `items.count`가 지금 빌릴 수 있는 수량인지, 전체 보유 수량인지
+**날짜는 ISO-8601이지만 타임존 오프셋이 없다.** 타입이 `LocalDateTime`이라 존 정보를 갖지 않는다.
+`"2026-09-04T18:00:00"` 형태로 온다. 가정하던 `+09:00`은 붙지 않으므로 목업도 빼야 한다.
+
+`app.py`는 오늘 날짜를 `Asia/Seoul`로 계산해 프롬프트에 넣는다. 응답이 존 없는 값이므로
+비교할 때 한국 시간으로 간주한다. 백엔드가 한국에서만 쓰이므로 당장은 문제가 없지만,
+서버가 해외 리전에 뜨면 어긋날 수 있다. 비교 코드에서 존을 명시한다.
+
+**엔드포인트**
+
+| 대상 | 주소 | 비고 |
+| --- | --- | --- |
+| 공지 목록 | `GET /v1/app/notices` | `?category= &cursor= &size=20` |
+| 공지 상세 | `GET /v1/app/notices/{noticeId}` | |
+| 행사 목록 | `GET /v1/app/events` | `?recruitStatus= &cursor= &size=` |
+| 행사 상세 | `GET /v1/app/events/{eventId}` | |
+| 아카이브 | `GET /v1/app/archives` | |
+| 빌릴게 재고 | `GET /items` | **다른 서버** |
+
+**응답 껍데기가 두 저장소에서 다르다.** `sync.py`가 각각 다르게 벗겨야 한다.
+
+```jsonc
+// stream-server — 두 겹
+{ "success": true, "code": "SUCCESS", "message": "요청에 성공했습니다.",
+  "data": { "content": [ ... ], "hasNext": true, "nextCursor": "eyJ..." } }
+
+// 빌릴게 — 껍데기 없음
+{ "items": [ ... ] }
+```
+
+**페이지네이션은 커서 기반이다.** `updatedAfter` 필터가 아니다. `hasNext`가 `false`가 될 때까지
+`nextCursor`를 따라가며 전부 가져온다. AGENTS.md대로 매번 전체를 다시 만드는 방식과 맞는다.
+
+**`items.count`는 지금 빌릴 수 있는 수량이다.** 전체 보유 수가 아니다.
+`RentalService`가 대여 시 `subtractCount`, 반납 시 `addCount`를 호출한다.
+단 `ItemType.CONSUMPTION`(소모품)은 반납해도 복구되지 않는다.
+
+**`recruitStatus`는 `BEFORE_OPEN` / `OPEN` / `CLOSED` 셋뿐이다.** 취소 상태가 없다.
+
+**삭제 필터는 백엔드가 한다.** 응답 DTO에 `isDeleted`가 없고, 조회 쿼리가 직접 거른다.
+
+```java
+// NoticeJpaRepository
+WHERE n.isDeleted = false
+
+// EventJpaRepository
+WHERE e.isDeleted = false
+AND e.isPublished = true
+```
+
+**행사에는 필터가 두 개다.** `is_published`는 스키마 문서 초안에 없던 컬럼이다.
+
+```sql
+-- V5__add_is_published_to_events.sql
+ALTER TABLE events ADD COLUMN is_published TINYINT(1) NOT NULL DEFAULT 0;
+```
+
+**기본값이 `0`이라 발행하지 않은 행사는 목록에 나오지 않는다.** 우리는 목록 API만 쓰므로
+따로 걸 필요가 없지만, 행사 수가 예상보다 적게 오면 이 컬럼을 먼저 의심한다.
+
+그래서 우리 쪽 `is_deleted` 필터는 **안전망으로만** 둔다. 백엔드를 거치지 않는 경로(가짜 API,
+시드 문서)가 있는 동안에는 여전히 필요하다.
+
+### 확정된 정책 (2026-09-23, 서준 확인)
+
+- [x] **AI 서버가 `/v1/app/` 아래를 그대로 호출한다.** 서버 간 전용 엔드포인트를 따로 내지 않는다
+- [x] **서버 간 인증은 서준이 붙인다.** 방식은 아직 정해지지 않았다.
+      3주차 `sync.py`가 실제 호출을 하기 전까지 형태를 받아야 한다
+- [x] **삭제 필터는 백엔드가 한다** (저장소 확인). 서준도 확답을 주지 못했으나 쿼리로 확인됐다
+
+### 남은 질문
+
+- [ ] 취소된 행사는 어떻게 표현되는지. `recruitStatus`에 `BEFORE_OPEN` / `OPEN` / `CLOSED`뿐이다.
+      `is_published`를 0으로 내려 목록에서 빼는 방식일 수도 있다
 - [ ] `notices`에 대상 학년도·학기 컬럼 추가 가능 여부 (불가하면 정규식 추출로 우회)
 - [ ] `events.recruit_status` 갱신 주기 (배치인지 실시간인지)
-- [ ] `events.recruit_status`에 취소 상태가 있는지.
-      스키마에는 `BEFORE_OPEN / OPEN / CLOSED`뿐인데 취소된 행사가 실제로 존재한다
+- [ ] `archives`, `items` 하드 삭제 여부
+- [ ] 사물함 구역별 잔여 수량을 인증 없이 조회할 수 있는지.
+      `lockers` · `locker_periods` 관련 컨트롤러가 아직 stream-server에 없다
 
-### 인증
-
-- [ ] 서버 간 인증 방식 (내부 토큰 등)
+아래 표는 **DB 컬럼 기준**이다. API 응답 필드명은 위 규칙대로 camelCase로 바꿔 읽는다.
 
 ---
 
