@@ -10,7 +10,7 @@ test_data/test_cases.json의 금지 문구를 모아 마크다운 표로 뽑는�
    들어 있으면 맞는 답을 하면서도 그 말을 쓸 수 있어, 멀쩡한 답이 위반으로 잡힌다.
 
 사용:
-    python tools/banned_report.py > docs/eval/banned-words.md
+    python tools/banned_report.py > eval/banned-words.md
 """
 
 import json
