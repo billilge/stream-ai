@@ -28,6 +28,25 @@ _HANGUL_OR_WORD = re.compile(r"[가-힣]+|[A-Za-z]+|\d+")
 _HANGUL = re.compile(r"^[가-힣]+$")
 
 # 조사·접미사만 떨어져 나온 토큰은 버린다. 어느 문서에나 있어서 변별력이 없다.
+# 줄임말·다른 이름. 질문에만 적용하고 인덱스에는 넣지 않는다. 인덱스까지 부풀리면
+# 엉뚱한 문서가 같은 낱말을 갖게 되어 점수가 흐려진다.
+# 한 줄이 한 묶음이고, 묶음 안의 낱말은 서로 바꿔 쓴다.
+SYNONYMS = (
+    ("개총", "개강총회"),
+    ("종총", "종강총회"),
+    ("체전", "체육대회"),
+    ("학회비", "학생회비"),
+    ("과방", "학생회실"),
+    ("대여", "빌릴게", "빌리", "빌려"),
+    ("사물함", "락커"),
+    ("슬랑제", "선배와의 만남"),
+)
+
+_SYNONYM_MAP: dict[str, tuple[str, ...]] = {}
+for _group in SYNONYMS:
+    for _word in _group:
+        _SYNONYM_MAP[_word] = _group
+
 _STOP = {
     "은", "는", "이", "가", "을", "를", "의", "에", "에서", "으로", "로", "도", "만",
     "와", "과", "하고", "이나", "인가", "인지", "있나", "있어", "있나요", "뭐", "뭔가",
@@ -54,6 +73,43 @@ def tokenize(text: str) -> list[str]:
         if _HANGUL.match(word) and len(word) > 2:
             tokens += [word[i:i + 2] for i in range(len(word) - 1)]
     return tokens
+
+
+def expand(tokens: list[str]) -> list[str]:
+    """질문 토큰에 줄임말의 다른 이름을 더한다.
+
+    "개총언제얌"의 개총과 문서의 개강총회가 글자를 공유하지 않아 BM25가 못 찾는다.
+    형태소 분석기를 붙여도 해결되지 않는 문제라 사전으로 다룬다.
+    """
+    extra: list[str] = []
+    for token in tokens:
+        for word in _SYNONYM_MAP.get(token, ()):
+            if word != token:
+                extra += tokenize(word)
+    return tokens + extra
+
+
+# "최근", "요즘", "한달간"처럼 최신순을 묻는 말. BM25는 낱말이 겹치는 정도만 보므로
+# 이런 질문에서 최신 공지를 찾지 못한다. 날짜로 정렬해 주는 경로가 따로 필요하다.
+_RECENCY = re.compile(r"최근|최신|요즘|근래|새로\s*올라온|한\s*달|이번\s*주|며칠")
+# 날짜순으로 돌려줄 문서 종류. 행사·안내는 최신순이 의미가 없어 넣지 않는다.
+_DATED_TYPES = ("공지", "아카이빙")
+
+
+def is_recency_query(query: str) -> bool:
+    """최신순으로 답해야 하는 질문인지."""
+    return bool(_RECENCY.search(query))
+
+
+def recent_chunks(index: dict, k: int) -> list[int]:
+    """게시일이 늦은 순으로 공지 청크 위치를 돌려준다."""
+    dated = [
+        (i, c["meta"].get("게시일", ""))
+        for i, c in enumerate(index["chunks"])
+        if c["meta"].get("문서유형") in _DATED_TYPES and c["meta"].get("게시일")
+    ]
+    dated.sort(key=lambda x: x[1], reverse=True)
+    return [i for i, _ in dated[:k]]
 
 
 def load_index(path: str = INDEX_PATH) -> dict:
@@ -109,7 +165,7 @@ def score(query: str, index: dict | None = None) -> list[tuple[int, float]]:
     빈 목록이 나와야 "모르겠습니다" 경로가 살아 있다.
     """
     idx = index or _index()
-    q_tokens = tokenize(query)
+    q_tokens = expand(tokenize(query))
     if not q_tokens:
         return []
 
@@ -151,7 +207,17 @@ def search(query: str, k: int = DEFAULT_K, index: dict | None = None) -> list[di
 
     picked: list[dict] = []
     seen: set[str] = set()
-    for i, value in score(query, idx):
+
+    # "최근 공지" 류는 날짜순을 먼저 채우고 남은 자리를 BM25로 메운다. 둘을 합치는 이유는
+    # "한달간 공지랑 가까운 행사"처럼 최신순과 내용 검색이 한 질문에 같이 오기 때문이다.
+    ordered: list[tuple[int, float]] = []
+    if is_recency_query(query):
+        # 날짜순이 상위를 다 차지하면 "한달간 공지랑 가까운 행사"에서 행사가 밀린다.
+        # 절반만 날짜순으로 채우고 나머지는 내용 검색에 맡긴다.
+        ordered += [(i, 0.0) for i in recent_chunks(idx, (k + 1) // 2)]
+    ordered += score(query, idx)
+
+    for i, value in ordered:
         chunk = chunks[i]
         doc_id = chunk["meta"].get("문서ID", "")
         if doc_id in seen:
