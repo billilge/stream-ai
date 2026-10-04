@@ -1,10 +1,36 @@
 # STREAM DB 스키마 (챗봇 참조용)
 
-> 출처: Flyway V1–V4 / MySQL / 26테이블 213컬럼
+> 출처: Flyway **V1–V14** / MySQL / 테이블 29개
+> 확인일: 2026-10-04 (`billilge/stream-server` 마이그레이션 원문)
 > 이 문서는 **챗봇(stream-ai)이 어떤 데이터를 어떻게 쓸지** 판단하기 위한 참조용이다.
 > 챗봇은 DB에 직접 붙지 않는다. 백엔드(Spring) API를 통해서만 접근한다.
 
 ---
+
+## 0. V5 이후 변경 이력 (2026-10-04 확인)
+
+이 문서의 초안은 V1–V4 기준이었다. 그 뒤 마이그레이션이 V14까지 왔고,
+챗봇 범위에 영향이 있는 것만 적는다. 나머지(V6·V7·V8·V11)는 인덱스 교체와
+학생회비 테이블 개편이라 우리가 쓰는 데이터 모양을 바꾸지 않는다.
+
+| 버전 | 변경 | 우리에게 미치는 영향 |
+| --- | --- | --- |
+| V5 | `events.is_published` 추가 | **필수 필터.** 목록 API가 `is_deleted = 0 AND is_published = 1`로 거른다 |
+| V9 | `locker_sections` 신설 · `lockers.section` 문자열 → `section_id` FK · `locker_number` INT · **`locker_periods.is_published` 추가** | 사물함 신청 기간·방법은 문서형(범위 내)이다. **게시 필터가 하나 더 있다** |
+| V10 | `items`에 `category` · `max_rental_days` · `return_deadline` 추가 | 대여 기간과 반납 마감이 **품목별 DB 값**이 됐다. 아래 `items` 절 참고 |
+| V12 | `feedback_rounds` 신설 · `open_feedbacks`에 `year`·`questioned_at` 추가 · **`category` 삭제** · `question` VARCHAR(500) | 목업과 `build_index.py` 로더가 어긋난다 |
+| V13 | `oauth_accounts` 신설 (provider 로그인) | 개인별 데이터(7주차 조건부)의 전제가 생겼다 |
+| V14 | `members.academic_status` 추가 (재학·휴학·졸업 원문, NULL 허용) | 자격 조건 질문("휴학생도 신청 되나요")의 근거가 될 수 있다. 다만 **개인별**이라 인증 뒤 |
+
+### 감사 컬럼은 상속이다
+
+`created_at`·`updated_at`·`is_deleted`는 테이블 정의에 직접 안 보이는 경우가 많다.
+엔티티가 `BaseTimeEntity` / `BaseCreatedTimeEntity` / `BaseSoftDeleteEntity`를 상속해 받기 때문이다.
+예: `NoticeJpaEntity extends BaseSoftDeleteEntity`라서 `notices.created_at`이 존재한다.
+
+스키마 그림이나 엔티티 파일에 그 컬럼이 없다고 "없다"고 판단하면 안 된다.
+`created_at`은 `insertable = false`(DB 기본값으로만 채움)인 곳이 있어, 앱이 시각을 직접 알아야 하는
+자리에는 전용 컬럼을 따로 둔다(`open_feedbacks.questioned_at`, `locker_applications.applied_at`).
 
 ## 1. 챗봇 관점 요약 (먼저 읽을 것)
 
@@ -29,6 +55,18 @@
 
 삭제된 공지를 챗봇이 계속 답하는 것이 가장 흔한 사고다.
 동기화(`sync.py`) 시 삭제 감지 로직 필수.
+
+**1-2. 게시 여부 필터는 두 테이블에 있다** ⚠️
+`is_deleted`와 **별개의 필터**다. 기본값이 `0`이라 발행하지 않은 것은 학생에게 보이지 않아야 한다.
+
+| 테이블 | 추가 버전 | 목록 조회 조건 |
+| --- | --- | --- |
+| `events` | V5 | `is_deleted = 0 AND is_published = 1` |
+| `locker_periods` | V9 | `is_published = 1` |
+
+V9 주석의 표현 그대로다 — "운영진이 준비 중인 회차가 학생에게 노출되지 않도록".
+**`locker_periods`를 빠뜨리면 아직 공개하지 않은 사물함 신청 기간을 챗봇이 먼저 알려준다.**
+관리자 게시 API가 생기기 전까지는 운영진이 DB에서 직접 켜므로, 목업에도 양쪽 값이 섞여 있어야 한다.
 
 **2. 학년도·학기 필드가 없다** ⚠️
 `notices`에 대상 학년도/학기 컬럼이 **존재하지 않는다.**
@@ -141,9 +179,12 @@
 | --- | --- | --- |
 | `id` | BIGINT PK | → `doc_id` = `item-{id}` (PK 이름이 `id`임에 주의) |
 | `name` | VARCHAR(255) | **RAG 대상**. "무슨 물품 있어요?" |
+| `category` | VARCHAR(30) | V10 추가. ELECTRONICS / DAILY_SUPPLIES / MEDICINE / HYGIENE |
 | `type` | VARCHAR(30) | CONSUMABLE / RENTAL |
 | `count` | INT | **실시간 전용. 절대 인덱싱 금지** |
 | `image_key` | VARCHAR(255) | 이미지 |
+| `max_rental_days` | INT NULL | V10 추가. 대여일부터 최대 대여 가능 일수(`0`이면 당일 반납). RENTAL만 값이 있다 |
+| `return_deadline` | TIME NULL | V10 추가. 반납 마감 시각(KST). RENTAL만 값이 있다 |
 
 **이 테이블이 두 경로로 갈리는 지점이다.**
 - 품목 목록·이용 안내 → RAG 인덱싱 OK
@@ -154,19 +195,79 @@
 
 `is_deleted` 없음. `updated_at`은 있음.
 
+#### ⚠️ 대여 기간이 품목별 값이 됐다 (V10)
+
+`docs/seed/borrow-guide.md`는 지금 이렇게 단정한다.
+
+> 대여 기간은 최대 3일이다.
+
+V10 이후 이건 **품목마다 다른 값**(`max_rental_days`)이고, 반납 마감 시각도 품목별(`return_deadline`)이다.
+게다가 마이그레이션 주석에 경고가 있다 — 기존 RENTAL 행은 둘 다 `NULL`로 남아
+"반납 마감이 계산되지 않는다"고 적혀 있다. 운영진이 직접 채워야 하는 값이다.
+
+그래서 질문 단위로 갈린다(AGENTS.md 데이터 분류).
+
+| 질문 | 분류 | 근거 |
+| --- | --- | --- |
+| "빌릴게 어떻게 빌려요" | 문서형 | 예약 → 학생회실 방문 흐름. 품목과 무관하다 |
+| "우산 며칠까지 빌릴 수 있어요" | **실시간** | `max_rental_days`가 품목별이다. 시드 문서에 쓰면 틀린 답이 고정된다 |
+| "몇 시까지 반납해야 해요" | **실시간** | `return_deadline`이 품목별이고 NULL일 수 있다 |
+
+시드 문서에서 "최대 3일"을 빼고 "품목마다 다르니 빌릴게 화면에서 확인"으로 바꾸는 것이 맞다.
+`count`와 같은 이유다 — 바뀌는 값을 문서에 적으면 인덱스를 다시 만들 때까지 틀린 답을 계속 한다.
+다만 `max_rental_days`는 `count`만큼 자주 바뀌지 않으므로, 4주차 `tools.py`에 넣을지
+시드 문서에서 단정만 빼고 둘지는 점수로 판단한다.
+
 ### open_feedbacks — 공개 피드백 Q&A
 
 | 컬럼 | 타입 | 챗봇 용도 |
 | --- | --- | --- |
 | `feedback_id` | BIGINT PK | → `doc_id` = `feedback-{id}` |
-| `round` | INT | 회차 |
-| `category` | VARCHAR(20) | **허용 값이 스키마에 정의돼 있지 않음** |
-| `question` | VARCHAR(1000) | 질문 |
+| `year` | INT | **V12 추가.** 회차가 연도별로 1차부터 다시 시작한다 |
+| `round` | INT | 회차. `year`와 함께 봐야 식별된다 |
+| `question` | VARCHAR(500) | V12에서 1000 → 500 |
+| `questioned_at` | DATETIME | **V12 추가.** 게시일로 이걸 쓴다. `created_at`이 아니다 |
 | `answer` | TEXT | 답변. **NULL 가능 → 미답변 건은 인덱싱 제외** |
+| `answered_at` | DATETIME | 답변 시각 |
 | `is_deleted` | TINYINT(1) | **필수 필터** |
 
+**`category`는 V12에서 삭제됐다.** "화면에 카테고리 선택 UI가 없어서" 제거했다는 주석이 있다.
+목업(`test_data/notices.json`의 `openFeedbacks`)에는 아직 `category`가 있고 `year`·`questionedAt`이 없다.
+
+`build_index.py`가 게시일로 `createdAt`을 읽는데, 이 테이블은 `questioned_at`이 전용 컬럼이다.
+`created_at`은 `insertable = false`라 앱이 값을 모르는 자리여서 따로 둔 것이다.
+
 이미 Q&A 형태라 RAG에 잘 맞는다. `answer IS NULL`인 행은 제외.
-단, 로드맵 6주 범위에서는 제외 항목("데이터가 아직 없음")이므로 우선순위 낮음.
+단, 데이터가 아직 1건뿐이라 우선순위는 낮다.
+
+### feedback_rounds — 피드백 회차 (V12 신설)
+
+| 컬럼 | 타입 | 챗봇 용도 |
+| --- | --- | --- |
+| `feedback_round_id` | BIGINT PK | |
+| `year`, `round` | INT | UNIQUE (year, round) |
+| `opens_at`, `closes_at` | DATETIME | **"열린피드백 언제까지 받아요?"의 근거** |
+
+접수 기간이 있는 테이블이라 **실시간**으로 갈린다. "지금 남긴 수 있나"는 현재 시각과 비교해야 한다.
+인덱싱하면 지난 회차 기간을 답한다.
+
+### lockers · locker_sections · locker_periods — 사물함 (V9 개편)
+
+사물함은 질문에 따라 세 갈래로 갈린다(10주 로드맵 "사물함은 개인별 항목만 뺀다").
+
+| 테이블 | 주요 컬럼 | 챗봇 용도 |
+| --- | --- | --- |
+| `locker_periods` | `name`, `apply_start_at`, `apply_end_at`, `usage_start_at`, `usage_end_at`, **`is_published`** | 신청 기간. **문서형 + 실시간** |
+| `locker_sections` | `locker_section_id`, `label` UNIQUE | 구역 라벨("A-1", "A-2", "C"). V9에서 문자열 컬럼에서 테이블로 승격 |
+| `lockers` | `section_id` FK, `locker_label`, `locker_number` INT, `row_no`, `column_no`, `status`, `is_deleted` | 구역별 잔여 수량 → **실시간** |
+
+- "사물함 신청 언제 어떻게 해요" → **문서형**. 공지에 있다
+- "A-1 구역 몇 자리 남았어요" → **실시간**. `lockers.status`를 세야 한다. 인덱싱 금지
+- "내 사물함 어디예요" → **개인별**. `locker_applications`. 인증 필요(7주차 조건부)
+
+`locker_number`가 V9에서 INT로 바뀐 이유가 주석에 있다 — 문자열이면 정렬이 `"1","10","2"`가 된다.
+`locker_applications`는 회차당 회원 1개, 회차당 사물함 1명으로 UNIQUE가 걸려 있고 **취소가 없다.**
+"신청 취소 어떻게 해요"의 답이 "사물함은 취소가 없다"일 수 있으므로 시드 문서와 대조할 것.
 
 ---
 
@@ -195,7 +296,7 @@ def get_item_stock(item_name: str) -> dict:
 
 ---
 
-## 4. sync.py 설계 메모 (3주차)
+## 4. sync.py 설계 메모 (5주차)
 
 ### 증분 동기화 쿼리 모양
 
@@ -324,6 +425,21 @@ ALTER TABLE events ADD COLUMN is_published TINYINT(1) NOT NULL DEFAULT 0;
       3주차 `sync.py`가 실제 호출을 하기 전까지 형태를 받아야 한다
 - [x] **삭제 필터는 백엔드가 한다** (저장소 확인). 서준도 확답을 주지 못했으나 쿼리로 확인됐다
 
+### 목업이 실제와 어긋난 것 (2026-10-04 확인)
+
+필드명 정정은 `test_data/`를 만드는 쪽(이승빈)이 하고, 여기 목록을 근거로 쓴다.
+
+| 파일 | 지금 | 실제 |
+| --- | --- | --- |
+| `test_data/billilge.json` | `itemId`, `itemName`, `itemType`, `imageUrl` | `id`, `name`, `type`, `imageKey` |
+| `test_data/billilge.json` | 없음 | `category`, `maxRentalDays`, `returnDeadline` 추가 필요 |
+| `test_data/notices.json` `openFeedbacks` | `category`, `createdAt` | `category` 삭제됨 · `year`, `questionedAt`, `answeredAt` 필요 |
+| `test_data/events.json` | `isPublished` 없음 | **필수 필터.** 발행/미발행 섞어 넣어야 한다 |
+| `test_data/lockers.json` | `zones`(`zoneId`, `building`, `floor`, `occupied`, `total`) | `lockers` + `locker_sections` 구조. `locker_periods.isPublished`도 필요 |
+
+`build_index.py`도 함께 봐야 한다 — `openFeedbacks`의 게시일을 `createdAt`에서 읽는데
+실제 전용 컬럼은 `questioned_at`이다.
+
 ### 남은 질문
 
 - [ ] 취소된 행사는 어떻게 표현되는지. `recruitStatus`에 `BEFORE_OPEN` / `OPEN` / `CLOSED`뿐이다.
@@ -343,16 +459,31 @@ ALTER TABLE events ADD COLUMN is_published TINYINT(1) NOT NULL DEFAULT 0;
 ### member (V1)
 `members` · `member_term_agreements` · `member_notification_settings` · `notifications`
 
-### event (V2)
+### event (V2, V9에서 추가)
 `events` · `event_questions` · `event_applications` · `event_application_answers` ·
-`lockers` · `locker_periods` · `locker_applications` · `archives` · `archive_related_links`
+`lockers` · `locker_periods` · `locker_applications` · `archives` · `archive_related_links` ·
+**`locker_sections`**(V9)
 
-### welfare (V3)
-`items` · `rental_histories` · `rental_status_worker_logs` · `student_fees` · `payers` ·
-`notices` · `chat_messages` · `open_feedbacks`
+### welfare (V3, V12에서 추가)
+`items` · `rental_histories` · `rental_status_worker_logs` · `payers` ·
+`notices` · `chat_messages` · `open_feedbacks` · **`feedback_rounds`**(V12)
+
+`student_fees`는 V8에서 `student_transfer_statuses`로 이름이 바뀌었다.
 
 ### internal (V4)
 `work_schedules` · `admin_config_values` · `display_posters` · `display_calendar_schedules` · `files`
+
+### auth (V13 신설)
+`oauth_accounts`
+
+### 챗봇 관련 테이블은 없다
+
+`chat_messages`(V3, 변경 없음)가 유일하다. 컬럼은 `message_id`·`member_id`·`sender_type`·`content`이고
+`created_at`은 `BaseCreatedTimeEntity`에서 온다. **FAQ·추천 질문 테이블은 V14까지 없다.**
+`GET /chat/suggested-questions`를 7주차로 미룬 판단이 2026-10-04에도 유효하다(10주 로드맵 참고).
+
+`sender_type`이 user/model을 구분하므로 **백엔드가 대화 이력을 꺼내 보낼 수 있다.**
+AI 서버는 요청마다 `messages`로 이력을 통째로 받는다.
 
 ---
 
