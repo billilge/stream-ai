@@ -1,13 +1,14 @@
 import json
 import logging
 import os
+import secrets
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from google import genai
 from google.genai import types
@@ -36,6 +37,15 @@ SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "system_v2.md").read_text(
 # 개발 환경에서만 데모 페이지를 연다. 배포할 때 ENV=prod 로 둔다.
 ENV = os.getenv("ENV", "dev")
 
+# 백엔드와 나눠 가진 비밀값. 백엔드는 이 값을 X-Internal-Token 헤더에 실어 보낸다.
+# 이 값을 아는 쪽(백엔드)에서 온 요청만 처리한다. 학생 로그인 확인은 백엔드가 이미 끝냈다.
+INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "")
+if ENV == "prod" and not INTERNAL_TOKEN:
+    # 배포에서 빠뜨리면 누구나 우리 Gemini 비용으로 질문할 수 있다. 조용히 뜨지 않고 멈춘다.
+    raise RuntimeError(
+        "ENV=prod 인데 환경변수 INTERNAL_TOKEN이 없습니다. 백엔드와 같은 값을 넣으세요."
+    )
+
 app = FastAPI()
 client = genai.Client()
 
@@ -51,8 +61,39 @@ class ChatReq(BaseModel):
     messages: list[Msg] = Field(min_length=1)
 
 
+def verify_backend(
+    x_internal_token: str | None = Header(default=None),
+    x_user_id: str | None = Header(default=None),
+) -> int | None:
+    """백엔드를 거친 요청인지 확인하고, 질문한 학생의 회원 ID를 돌려준다.
+
+    FastAPI가 `/chat`을 실행하기 **전에** 이 함수를 먼저 부른다(Depends).
+    그래서 여기서 거절하면 스트림이 열리기 전이라 401·400 상태 코드로 깔끔하게 끝난다.
+
+    개발 환경에서 INTERNAL_TOKEN을 비워 두면 검사하지 않는다. 데모 페이지는 브라우저에서
+    바로 부르므로 토큰을 실을 수 없다. 배포(prod)에서는 비워 둘 수 없다(위에서 막는다).
+    """
+    if not INTERNAL_TOKEN:
+        return None
+
+    # compare_digest: 앞에서부터 한 글자씩 비교하다 다르면 바로 멈추는 일반 비교(==)는
+    # 응답 시간 차이로 토큰을 한 글자씩 알아낼 수 있다. 이 함수는 항상 같은 시간이 걸린다.
+    # bytes로 바꾸는 이유는 헤더에 한글 같은 문자가 오면 str 비교가 예외를 내기 때문이다.
+    if x_internal_token is None or not secrets.compare_digest(
+        x_internal_token.encode(), INTERNAL_TOKEN.encode()
+    ):
+        # 왜 틀렸는지(없음/불일치)는 알려주지 않는다. 알려주면 공격하는 쪽만 돕는다.
+        raise HTTPException(status_code=401, detail="인증되지 않은 요청입니다")
+
+    # isascii를 같이 보는 이유: isdigit은 "²" 같은 문자도 숫자로 친다.
+    if x_user_id is None or not (x_user_id.isascii() and x_user_id.isdigit()) or int(x_user_id) <= 0:
+        raise HTTPException(status_code=400, detail="사용자 식별자가 올바르지 않습니다")
+    return int(x_user_id)
+
+
 @app.get("/health")
 def health():
+    # 배포 도구가 서버 상태를 확인하는 주소라 검증하지 않는다. 비밀 정보도 없다.
     return {"status": "ok"}
 
 
@@ -209,7 +250,9 @@ async def relay(req: Request, messages: list[Msg]):
 
 
 @app.post("/chat")
-async def chat(req: Request, body: ChatReq):
+async def chat(req: Request, body: ChatReq, user_id: int | None = Depends(verify_backend)):
+    # user_id는 아직 쓰지 않는다. 개인 데이터 조회 도구(#52)가 이 값으로만 조회한다.
+    # 모델이 정한 값을 쓰면 다른 학생 정보를 물어 꺼낼 수 있기 때문이다.
     return StreamingResponse(
         relay(req, body.messages),
         media_type="text/event-stream",
