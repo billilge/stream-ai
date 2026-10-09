@@ -7,8 +7,8 @@
 - **답변 채점** — `정답요지`가 답에 들어있고 `금지`가 안 들어있나
 
 정답요지는 기본으로 **LLM 채점기**가 판정한다(`prompts/judge_v1.md`). 예전 낱말 비교 채점은
-뜻이 같아도 표현이 다르면 놓쳐서, 사람 판정과 비교해 실제 충족의 61%만 잡았다
-(`eval/grading-audit.md`). 채점기를 바꾸면 `--calibrate`로 사람 판정과 먼저 맞춰 본다.
+뜻이 같아도 표현이 다르면 놓쳐서, 기준 판정과 비교해 실제 충족의 61%만 잡았다
+(`eval/grading-audit.md`). 채점기를 바꾸면 `--calibrate`로 기준 판정과 먼저 맞춰 본다.
 
 세 지표는 성격이 다르다. Recall@5는 `search.py`를, 함정 정답률과 답변 채점은
 프롬프트를 본다. **프롬프트를 고쳤는데 Recall@5가 그대로인 것은 정상이다.**
@@ -21,7 +21,7 @@ v1/v2를 비교할 때는 뒤의 둘로 판단한다.
     python eval.py --out eval/run-v2.json   점수표를 파일로 남긴다
     python eval.py --answers eval/run-v2.json   저장된 답변을 다시 채점만 한다 (답변 생성 없음)
     python eval.py --grader rule    예전 낱말 비교 채점 (지난 기록과 비교할 때만)
-    python eval.py --calibrate      채점기를 사람 판정(eval/judge-labels.jsonl)과 비교한다
+    python eval.py --calibrate      채점기를 기준 판정(eval/judge-labels.jsonl)과 비교한다
 """
 
 import argparse
@@ -191,7 +191,7 @@ def grade_answer(row: dict, answer: str, met: list[bool] | None = None) -> dict:
 # ─────────────────────────────────────────────────────────────
 # 낱말 비교는 "따로 설치할 앱은 없어요"와 "별도 설치 없음"이 같은 말인지 모른다.
 # 그래서 뜻을 이해하는 모델에게 맡긴다. 대신 모델 판정도 틀릴 수 있으므로,
-# 사람이 직접 판정한 정답표(eval/judge-labels.jsonl)와 맞춰 보고(--calibrate) 쓴다.
+# 미리 판정해 둔 기준표(eval/judge-labels.jsonl)와 맞춰 보고(--calibrate) 쓴다.
 
 JUDGE_PROMPT_PATH = "prompts/judge_v1.md"
 LABELS_PATH = "eval/judge-labels.jsonl"
@@ -269,7 +269,7 @@ def judge_answers(rows: list[dict], answers: dict) -> dict[int, list[bool] | Non
 
 
 def calibrate(path: str = LABELS_PATH) -> None:
-    """채점기 판정을 사람 판정과 비교한다. 채점기나 판정 프롬프트를 고친 뒤 먼저 돌린다.
+    """채점기 판정을 기준 판정과 비교한다. 채점기나 판정 프롬프트를 고친 뒤 먼저 돌린다.
 
     두 번 돌려 같은지도 본다. 일치율이 높아도 돌릴 때마다 판정이 바뀌면 점수 차이를 믿을 수 없다.
     """
@@ -285,7 +285,7 @@ def calibrate(path: str = LABELS_PATH) -> None:
         if a is None or b is None:
             failed += len(it["정답요지"])
             continue
-        for need, human, x, y in zip(it["정답요지"], it["사람판정"], a, b):
+        for need, human, x, y in zip(it["정답요지"], it["기준판정"], a, b):
             total += 1
             llm_ok += x == human
             rule_ok += _covered(need, it["답변"]) == human
@@ -293,12 +293,12 @@ def calibrate(path: str = LABELS_PATH) -> None:
             if x != human:
                 diffs.append((it["id"], need, human, x))
 
-    print(f"\n사람 판정 {total}요지 기준 (채점 실패 {failed}요지 제외)")
+    print(f"\n기준 판정 {total}요지 (채점 실패 {failed}요지 제외)")
     print(f"  LLM 채점기 일치  {llm_ok}/{total} = {llm_ok / total:.1%}")
     print(f"  낱말 비교 일치   {rule_ok}/{total} = {rule_ok / total:.1%}")
     print(f"  두 번 돌린 판정이 같음  {stable}/{total} = {stable / total:.1%}")
     for i, need, human, got in diffs:
-        print(f"    불일치 #{i:>2} {need!r}  사람={'O' if human else 'X'} 채점기={'O' if got else 'X'}")
+        print(f"    불일치 #{i:>2} {need!r}  기준={'O' if human else 'X'} 채점기={'O' if got else 'X'}")
 
 
 async def answer_all(rows: list[dict], today: str, search_fn, concurrency: int = 3) -> dict:
@@ -473,7 +473,7 @@ def main() -> None:
     ap.add_argument("--grader", choices=["llm", "rule"], default="llm",
                     help="정답요지 채점 방식. rule은 예전 낱말 비교 (지난 기록과 비교할 때만)")
     ap.add_argument("--calibrate", action="store_true",
-                    help="채점기를 사람 판정과 비교하고 끝낸다")
+                    help="채점기를 기준 판정과 비교하고 끝낸다")
     args = ap.parse_args()
 
     if args.calibrate:
