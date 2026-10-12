@@ -6,6 +6,10 @@
 - **함정 정답률** — 답이 없는 질문에 "모르겠다"고 했나. 환각을 재는 유일한 지표다
 - **답변 채점** — `정답요지`가 답에 들어있고 `금지`가 안 들어있나
 
+정답요지는 기본으로 **LLM 채점기**가 판정한다(`prompts/judge_v1.md`). 예전 낱말 비교 채점은
+뜻이 같아도 표현이 다르면 놓쳐서, 기준 판정과 비교해 실제 충족의 61%만 잡았다
+(`eval/grading-audit.md`). 채점기를 바꾸면 `--calibrate`로 기준 판정과 먼저 맞춰 본다.
+
 세 지표는 성격이 다르다. Recall@5는 `search.py`를, 함정 정답률과 답변 채점은
 프롬프트를 본다. **프롬프트를 고쳤는데 Recall@5가 그대로인 것은 정상이다.**
 v1/v2를 비교할 때는 뒤의 둘로 판단한다.
@@ -15,6 +19,9 @@ v1/v2를 비교할 때는 뒤의 둘로 판단한다.
     python eval.py --no-llm         검색 지표만 (빠르다)
     python eval.py --prompt v1      프롬프트 버전을 바꿔 비교
     python eval.py --out eval/run-v2.json   점수표를 파일로 남긴다
+    python eval.py --answers eval/run-v2.json   저장된 답변을 다시 채점만 한다 (답변 생성 없음)
+    python eval.py --grader rule    예전 낱말 비교 채점 (지난 기록과 비교할 때만)
+    python eval.py --calibrate      채점기를 기준 판정(eval/judge-labels.jsonl)과 비교한다
 """
 
 import argparse
@@ -144,11 +151,13 @@ def _covered(need: str, answer: str) -> bool:
     return sum(1 for w in words if w in answer) / len(words) >= _MATCH_RATIO
 
 
-def grade_answer(row: dict, answer: str) -> dict:
+def grade_answer(row: dict, answer: str, met: list[bool] | None = None) -> dict:
     """답변 하나를 채점한다.
 
     함정은 거절했는지만 본다. 그 외에는 `정답요지`가 담겼는지와 `금지`를
     어겼는지를 따로 센다.
+
+    `met`은 LLM 채점기가 정답요지마다 낸 판정이다. 없으면 낱말 비교(`_covered`)로 센다.
 
     금지는 정답요지보다 엄하게 본다. "조형대학"처럼 **틀린 답을 실제로 말했는지**를
     보는 것이라 느슨하게 잡으면 사고를 놓친다. 그래서 부분 문자열 그대로 쓴다.
@@ -163,17 +172,133 @@ def grade_answer(row: dict, answer: str) -> dict:
         return {"함정": True, "거절": _refused(answer), "판정": len(checks)}
 
     need = row.get("정답요지") or []
-    met = [n for n in need if _covered(n, answer)]
+    if met is None:
+        met = [_covered(n, answer) for n in need]
     flat = answer.replace(" ", "")
     banned = [b for b in (row.get("금지") or []) if b.replace(" ", "") in flat]
     return {
         "함정": False,
         "정답요지": len(need),
-        "충족": len(met),
+        "충족": sum(met),
         "위반": banned,
         "판정": len(checks),
         "거절": _refused(answer),
     }
+
+
+# ─────────────────────────────────────────────────────────────
+# LLM 채점기 — 정답요지가 답변에 담겼는지 모델에게 판정시킨다
+# ─────────────────────────────────────────────────────────────
+# 낱말 비교는 "따로 설치할 앱은 없어요"와 "별도 설치 없음"이 같은 말인지 모른다.
+# 그래서 뜻을 이해하는 모델에게 맡긴다. 대신 모델 판정도 틀릴 수 있으므로,
+# 미리 판정해 둔 기준표(eval/judge-labels.jsonl)와 맞춰 보고(--calibrate) 쓴다.
+
+JUDGE_PROMPT_PATH = "prompts/judge_v1.md"
+LABELS_PATH = "eval/judge-labels.jsonl"
+
+
+async def judge_rows(items: list[dict], concurrency: int = 3) -> dict[int, list[bool] | None]:
+    """문항마다 정답요지 판정 목록을 돌려준다. 판정에 실패한 문항은 None이다.
+
+    `items`의 각 항목은 `id`, `질문`, `정답요지`, `답변`을 갖는다.
+
+    temperature 0으로 부른다. 같은 답변을 두 번 채점해서 결과가 다르면 점수 차이가
+    프롬프트 때문인지 채점기 기분 때문인지 구분할 수 없다.
+    응답은 JSON 모양을 정해 받는다(response_schema). 자유 문장으로 받으면 파싱이 깨진다.
+    """
+    from google import genai
+    from google.genai import types
+    from pydantic import BaseModel
+
+    class Point(BaseModel):
+        reason: str
+        met: bool
+
+    class Verdict(BaseModel):
+        points: list[Point]
+
+    client = genai.Client()
+    model = os.getenv("JUDGE_MODEL") or os.getenv("GEMINI_MODEL")
+    system = pathlib.Path(JUDGE_PROMPT_PATH).read_text(encoding="utf-8")
+    cfg = types.GenerateContentConfig(
+        system_instruction=system,
+        temperature=0,
+        response_mime_type="application/json",
+        response_schema=Verdict,
+    )
+    sem = asyncio.Semaphore(concurrency)
+    out: dict[int, list[bool] | None] = {}
+
+    async def one(item):
+        need = item["정답요지"]
+        listed = "\n".join(f"{i}. {n}" for i, n in enumerate(need, 1))
+        text = f"# 질문\n{item['질문']}\n\n# 정답요지\n{listed}\n\n# 답변\n{item['답변']}"
+        async with sem:
+            try:
+                # 응답 없이 멈추는 호출이 실제로 있었다. 하나 때문에 전체가 끝나지 않으면 안 되므로 끊는다.
+                resp = await asyncio.wait_for(
+                    client.aio.models.generate_content(model=model, contents=text, config=cfg),
+                    timeout=60,
+                )
+                verdict = resp.parsed
+            except Exception as exc:
+                print(f"  채점 실패 #{item['id']}: {type(exc).__name__}: {exc}", file=sys.stderr)
+                out[item["id"]] = None
+                return
+        # 개수가 다르면 어느 판정이 어느 요지 것인지 알 수 없다. 추측해서 맞추지 않고 실패로 둔다.
+        if verdict is None or len(verdict.points) != len(need):
+            print(f"  채점 실패 #{item['id']}: 판정 개수가 요지 개수와 다름", file=sys.stderr)
+            out[item["id"]] = None
+            return
+        out[item["id"]] = [p.met for p in verdict.points]
+
+    await asyncio.gather(*(one(it) for it in items))
+    return out
+
+
+def judge_answers(rows: list[dict], answers: dict) -> dict[int, list[bool] | None]:
+    """골든셋 답변 중 정답요지가 있는 문항만 골라 채점기에 넘긴다."""
+    items = [
+        {"id": r["id"], "질문": r["질문"], "정답요지": r["정답요지"], "답변": answers[r["id"]]}
+        for r in rows
+        if not r.get("함정") and r.get("정답요지")
+        and r["id"] in answers and not answers[r["id"]].startswith("__ERROR__")
+    ]
+    print(f"LLM 채점 {len(items)}건...")
+    return asyncio.run(judge_rows(items))
+
+
+def calibrate(path: str = LABELS_PATH) -> None:
+    """채점기 판정을 기준 판정과 비교한다. 채점기나 판정 프롬프트를 고친 뒤 먼저 돌린다.
+
+    두 번 돌려 같은지도 본다. 일치율이 높아도 돌릴 때마다 판정이 바뀌면 점수 차이를 믿을 수 없다.
+    """
+    lines = pathlib.Path(path).read_text(encoding="utf-8").splitlines()
+    items = [json.loads(line) for line in lines[1:] if line.strip()]
+    first = asyncio.run(judge_rows(items))
+    second = asyncio.run(judge_rows(items))
+
+    total = llm_ok = rule_ok = stable = failed = 0
+    diffs = []
+    for it in items:
+        a, b = first.get(it["id"]), second.get(it["id"])
+        if a is None or b is None:
+            failed += len(it["정답요지"])
+            continue
+        for need, human, x, y in zip(it["정답요지"], it["기준판정"], a, b):
+            total += 1
+            llm_ok += x == human
+            rule_ok += _covered(need, it["답변"]) == human
+            stable += x == y
+            if x != human:
+                diffs.append((it["id"], need, human, x))
+
+    print(f"\n기준 판정 {total}요지 (채점 실패 {failed}요지 제외)")
+    print(f"  LLM 채점기 일치  {llm_ok}/{total} = {llm_ok / total:.1%}")
+    print(f"  낱말 비교 일치   {rule_ok}/{total} = {rule_ok / total:.1%}")
+    print(f"  두 번 돌린 판정이 같음  {stable}/{total} = {stable / total:.1%}")
+    for i, need, human, got in diffs:
+        print(f"    불일치 #{i:>2} {need!r}  기준={'O' if human else 'X'} 채점기={'O' if got else 'X'}")
 
 
 async def answer_all(rows: list[dict], today: str, search_fn, concurrency: int = 3) -> dict:
@@ -219,17 +344,21 @@ async def answer_all(rows: list[dict], today: str, search_fn, concurrency: int =
     return out
 
 
-def summarize(rows: list[dict], answers: dict, recall: dict) -> dict:
+def summarize(rows: list[dict], answers: dict, recall: dict,
+              judged: dict[int, list[bool] | None] | None = None) -> dict:
     """점수표를 만든다. 출처구분별로 나눠 낸다.
 
     전체 평균만 보면 오해한다. 2주차에는 실시간·학교공식 케이스를 아직 못 푸는데,
     그것들까지 섞은 평균은 프롬프트를 고쳐도 잘 움직이지 않는다.
+
+    `judged`가 있으면 LLM 채점기 판정으로 센다. 채점기가 실패한 문항은 점수에서 빼고
+    "채점실패"로 따로 남긴다. 낱말 비교로 대신 세면 두 잣대가 섞인 숫자가 된다.
     """
     traps = [r for r in rows if r.get("함정")]
     refused = sum(1 for r in traps if grade_answer(r, answers.get(r["id"], ""))["거절"])
 
     by_src = defaultdict(lambda: {"문항": 0, "충족": 0, "요지": 0, "위반": 0})
-    violations, errors = [], []
+    violations, errors, judge_failed = [], [], []
     # 사람이 봐야 하는 금지. 자동 채점에서 뺀 것이므로 "0건"으로 조용히 사라지지 않게 센다.
     pending = [
         {"id": r["id"], "질문": r["질문"], "함정": bool(r.get("함정")), "판정": r["금지판정"]}
@@ -242,7 +371,13 @@ def summarize(rows: list[dict], answers: dict, recall: dict) -> dict:
             continue
         if r.get("함정"):
             continue
-        g = grade_answer(r, ans)
+        met = None
+        if judged is not None and r.get("정답요지"):
+            met = judged.get(r["id"])
+            if met is None:
+                judge_failed.append(r["id"])
+                continue
+        g = grade_answer(r, ans, met)
         b = by_src[r["출처구분"]]
         b["문항"] += 1
         b["요지"] += g["정답요지"]
@@ -256,6 +391,7 @@ def summarize(rows: list[dict], answers: dict, recall: dict) -> dict:
 
     return {
         "문항수": len(rows),
+        "채점방식": "llm" if judged is not None else "rule",
         "recall@5": recall,
         "함정": {
             "대상": len(traps),
@@ -266,6 +402,7 @@ def summarize(rows: list[dict], answers: dict, recall: dict) -> dict:
         "금지위반": violations,
         "금지판정대기": pending,
         "오류": errors,
+        "채점실패": judge_failed,
     }
 
 
@@ -290,7 +427,7 @@ def report(meta: dict, summary: dict, k: int, with_llm: bool) -> None:
     print(f"  {tr['거절']} / {tr['대상']}  =  {tr['점수']:.1%}", end="")
     print(f"   (완료 기준 20건 중 16건 = 80%)")
 
-    print(f"\n[답변] 정답요지 충족률 — 출처구분별")
+    print(f"\n[답변] 정답요지 충족률 — 출처구분별  (채점: {summary['채점방식']})")
     for src, b in sorted(summary["출처구분별"].items()):
         rate = f"{b['요지충족률']:.1%}" if b["요지충족률"] is not None else "-"
         print(f"  {src:14} {b['충족']:>3}/{b['요지']:<3} = {rate:>6}   ({b['문항']}문항, 금지위반 {b['위반']})")
@@ -313,6 +450,9 @@ def report(meta: dict, summary: dict, k: int, with_llm: bool) -> None:
             for c in p["판정"]:
                 print(f"          {c}")
 
+    if summary.get("채점실패"):
+        print(f"\n[채점실패] {len(summary['채점실패'])}문항은 점수에서 뺐다: {summary['채점실패']}")
+
     if summary["오류"]:
         print(f"\n[오류] {len(summary['오류'])}건")
         for e in summary["오류"]:
@@ -328,7 +468,17 @@ def main() -> None:
     ap.add_argument("--prompt", default=None,
                     help="프롬프트 버전 (예: v1). prompts/system_{버전}.md 를 읽는다")
     ap.add_argument("--out", default=None, help="점수표를 저장할 JSON 경로")
+    ap.add_argument("--answers", default=None,
+                    help="저장된 점수표(JSON)의 답변을 다시 채점한다. 답변을 새로 만들지 않는다")
+    ap.add_argument("--grader", choices=["llm", "rule"], default="llm",
+                    help="정답요지 채점 방식. rule은 예전 낱말 비교 (지난 기록과 비교할 때만)")
+    ap.add_argument("--calibrate", action="store_true",
+                    help="채점기를 기준 판정과 비교하고 끝낸다")
     args = ap.parse_args()
+
+    if args.calibrate:
+        calibrate()
+        return
 
     # 프롬프트 버전을 바꿔 끼운다. app 을 import 하기 전에 해야 모듈 로드 시점에 반영된다.
     if args.prompt:
@@ -346,14 +496,22 @@ def main() -> None:
     recall = recall_at_k(rows, args.k, search_fn)
 
     answers = {}
-    if not args.no_llm:
+    if args.answers:
+        saved = json.loads(pathlib.Path(args.answers).read_text(encoding="utf-8"))
+        answers = {int(k): v for k, v in saved.get("답변", {}).items()}
+        print(f"저장된 답변 {len(answers)}건을 다시 채점한다: {args.answers}")
+    elif not args.no_llm:
         if today is None:
             sys.exit("골든셋 메타에 기준시각이 없습니다. 상대 날짜 질문을 재현할 수 없습니다.")
         print(f"LLM 호출 {len(rows)}건... (기준시각 {today})")
         answers = asyncio.run(answer_all(rows, today, search_fn))
 
-    summary = summarize(rows, answers, recall)
-    report(meta, summary, args.k, not args.no_llm)
+    judged = None
+    if answers and args.grader == "llm":
+        judged = judge_answers(rows, answers)
+
+    summary = summarize(rows, answers, recall, judged)
+    report(meta, summary, args.k, bool(answers))
 
     if args.out:
         payload = {"메타": meta, "프롬프트": args.prompt or "현재", "요약": summary}
