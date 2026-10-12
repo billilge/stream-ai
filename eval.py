@@ -152,9 +152,15 @@ def grade_answer(row: dict, answer: str) -> dict:
 
     금지는 정답요지보다 엄하게 본다. "조형대학"처럼 **틀린 답을 실제로 말했는지**를
     보는 것이라 느슨하게 잡으면 사고를 놓친다. 그래서 부분 문자열 그대로 쓴다.
+
+    그 대가로 **글자로 찾을 수 없는 금지는 여기서 잴 수 없다.** "추측으로 답하기"처럼
+    행동을 설명한 것, 살아 있는 문서에도 있어 맞는 답에 섞일 수 있는 문구가 그렇다.
+    그런 항목은 `금지판정` 칸에 두고 사람이 본다. 자동 채점에 섞으면 둘 중 하나가 된다 —
+    영원히 안 걸리거나(0건을 0건으로 보고), 멀쩡한 답을 위반으로 잡거나.
     """
+    checks = row.get("금지판정") or []
     if row.get("함정"):
-        return {"함정": True, "거절": _refused(answer)}
+        return {"함정": True, "거절": _refused(answer), "판정": len(checks)}
 
     need = row.get("정답요지") or []
     met = [n for n in need if _covered(n, answer)]
@@ -165,6 +171,7 @@ def grade_answer(row: dict, answer: str) -> dict:
         "정답요지": len(need),
         "충족": len(met),
         "위반": banned,
+        "판정": len(checks),
         "거절": _refused(answer),
     }
 
@@ -221,6 +228,11 @@ def summarize(rows: list[dict], answers: dict, recall: dict) -> dict:
 
     by_src = defaultdict(lambda: {"문항": 0, "충족": 0, "요지": 0, "위반": 0})
     violations, errors = [], []
+    # 사람이 봐야 하는 금지. 자동 채점에서 뺀 것이므로 "0건"으로 조용히 사라지지 않게 센다.
+    pending = [
+        {"id": r["id"], "질문": r["질문"], "함정": bool(r.get("함정")), "판정": r["금지판정"]}
+        for r in rows if r.get("금지판정")
+    ]
     for r in rows:
         ans = answers.get(r["id"], "")
         if ans.startswith("__ERROR__"):
@@ -250,6 +262,7 @@ def summarize(rows: list[dict], answers: dict, recall: dict) -> dict:
         },
         "출처구분별": dict(by_src),
         "금지위반": violations,
+        "금지판정대기": pending,
         "오류": errors,
     }
 
@@ -284,6 +297,19 @@ def report(meta: dict, summary: dict, k: int, with_llm: bool) -> None:
         print(f"\n[경고] 금지 표현 위반 {len(summary['금지위반'])}건")
         for v in summary["금지위반"]:
             print(f"    #{v['id']:>2} {v['질문'][:34]} → {v['위반']}")
+
+    pending = summary["금지판정대기"]
+    if pending:
+        # 이 숫자를 지우면 "위반 0건"이 다시 거짓말이 된다. 자동으로 못 재는 몫이다.
+        trap_n = sum(1 for p in pending if p["함정"])
+        print(f"\n[판정] 사람이 봐야 하는 금지 {len(pending)}문항"
+              f"  (함정 {trap_n}건은 함정 정답률이 따로 잼)")
+        for p in pending:
+            if p["함정"]:
+                continue
+            print(f"    #{p['id']:>2} {p['질문'][:34]}")
+            for c in p["판정"]:
+                print(f"          {c}")
 
     if summary["오류"]:
         print(f"\n[오류] {len(summary['오류'])}건")
