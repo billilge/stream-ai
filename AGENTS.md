@@ -91,7 +91,7 @@ GET /health
   응답: { "status": "ok" }
 
 POST /chat
-  헤더: X-Internal-Token, X-User-Id   (아직 미구현. 계약 확정 후 추가)
+  헤더: X-Internal-Token, X-User-Id   (토큰 불일치 401, 사용자 ID가 양의 정수가 아니면 400)
   본문: { "messages": [ { "role": "user" | "model", "text": str } ] }
   응답: SSE 스트림
 ```
@@ -240,7 +240,7 @@ ID로 하나 꺼내는 것은 DB가 잘하지만, 수백 건 중 관련된 것�
 
 - `ENV=prod`로 둔다. 확인용 데모 페이지(`GET /`)가 등록되지 않아야 한다.
 - 백엔드와 같은 내부망에 둔다. 인터넷에 직접 노출하지 않는다.
-- `X-Internal-Token`, `X-User-Id` 검증을 붙인다. 현재 미구현이다.
+- `INTERNAL_TOKEN`을 백엔드의 `STREAM_AI_INTERNAL_TOKEN`과 같은 값으로 넣는다. `ENV=prod`인데 비어 있으면 서버가 뜨지 않는다.
 - `.env`는 서버에서 직접 만든다. 저장소에 올리지 않는다.
 - 인덱스 갱신 스케줄을 건다. 갱신이 멈추면 공지 수정이 반영되지 않는다.
 
