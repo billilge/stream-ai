@@ -15,6 +15,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 from search import search
+from tools import TOOLS
 
 load_dotenv()
 
@@ -223,8 +224,11 @@ async def relay(req: Request, messages: list[Msg]):
             for m in messages
         ]
         # 모델은 오늘이 며칠인지 모른다. 알려주지 않으면 유효기간이 지났는지 짐작으로 답한다.
+        # tools: 모델이 필요할 때 부를 수 있는 조회 함수(tools.py). SDK가 호출과 결과 전달을
+        # 알아서 처리하고, 스트림에는 최종 답변 글자만 나온다. 그래서 아래 말풍선 처리는 그대로다.
         config = types.GenerateContentConfig(
-            system_instruction=build_system_instruction(docs)
+            system_instruction=build_system_instruction(docs),
+            tools=TOOLS,
         )
 
         stream = await client.aio.models.generate_content_stream(

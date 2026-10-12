@@ -195,8 +195,10 @@ async def answer_all(rows: list[dict], today: str, search_fn, concurrency: int =
     async def one(row):
         async with sem:
             docs = search_fn(row["질문"], k=DEFAULT_K)
+            # 도구 목록도 서버와 같은 것을 넘긴다. 빠지면 재고 질문을 서버와 다르게 답한다.
             cfg = types.GenerateContentConfig(
-                system_instruction=app.build_system_instruction(docs, today=today)
+                system_instruction=app.build_system_instruction(docs, today=today),
+                tools=app.TOOLS,
             )
             try:
                 stream = await client.aio.models.generate_content_stream(
