@@ -13,7 +13,7 @@ main 머지 → GitHub Actions가 이미지 빌드 → GHCR에 올림 → Coolif
 
 ## 처음 한 번 해야 하는 것
 
-Coolify 관리자 권한이 필요하다. 백엔드 담당(서준)과 같이 한다.
+Coolify 관리자 권한이 필요하다. Coolify 담당(수민)과 같이 한다.
 
 ### 1. Coolify에 리소스 만들기
 
