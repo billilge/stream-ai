@@ -5,6 +5,7 @@
 
 색인 대상은 db-schema.md의 "RAG 인덱싱" 경로를 따른다.
 - docs/seed/ 고정 정보 문서
+- docs/faq/faq.json 자주 묻는 질문의 고정 답변
 - notices, archives, open_feedbacks (test_data/notices.json)
 - events 소개글 (test_data/events.json)
 
@@ -28,6 +29,7 @@ import normalize
 import search as searcher
 
 SEED_DIR = "docs/seed"
+FAQ_PATH = "docs/faq/faq.json"
 DATA_DIR = "test_data"
 OUT_PATH = "index/bm25.json"
 
@@ -64,6 +66,33 @@ def load_seed(seed_dir: str = SEED_DIR) -> list[dict]:
             for key, value in re.findall(r"^(\S+):\s*(.*)$", matched.group(1), re.M)
         }
         docs.append({"text": matched.group(2), "meta": meta})
+    return docs
+
+
+def load_faq(path: str = FAQ_PATH) -> list[dict]:
+    """자주 묻는 질문의 고정 답변을 읽는다.
+
+    질문 문장을 본문에 함께 넣는다. 학생이 쓰는 말("빌릴게 설치 어떻게 해")과 문서에
+    적힌 말("별도 설치 없이 Stream 웹에서")이 서로 다른 낱말이라 답변만 넣으면 검색이
+    걸리지 않는다. 질문을 같이 넣어 학생의 말로도 찾히게 한다.
+
+    게시일은 파일의 _updated를 쓴다. FAQ는 만료가 없어 유효기간은 비워 둔다.
+    """
+    if not os.path.exists(path):
+        _log(f"[건너뜀] FAQ 파일이 없습니다: {path}")
+        return []
+
+    raw = json.load(open(path, encoding="utf-8"))
+    published = _date(raw.get("_updated"))
+    docs = []
+    for item in raw.get("faqs", []):
+        docs.append({
+            "text": f"질문: {item['question']}\n답변: {item['answer']}",
+            "meta": {
+                "문서ID": f"faq-{item['faqId']}", "제목": item["question"],
+                "게시일": published, "유효기간": "",
+                "출처URL": "", "문서유형": "자주 묻는 질문"},
+        })
     return docs
 
 
@@ -166,13 +195,15 @@ def build(docs: list[dict], use_normalize: bool = True) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="BM25 인덱스를 만든다.")
     parser.add_argument("--seed-dir", default=SEED_DIR)
+    parser.add_argument("--faq-path", default=FAQ_PATH)
     parser.add_argument("--data-dir", default=DATA_DIR)
     parser.add_argument("--out", default=OUT_PATH)
     parser.add_argument("--no-normalize", action="store_true",
                         help="인사말·맺음말 정규화를 끄고 빌드한다 (전후 비교용)")
     args = parser.parse_args()
 
-    docs = load_seed(args.seed_dir) + load_notices(args.data_dir) + load_events(args.data_dir)
+    docs = (load_seed(args.seed_dir) + load_faq(args.faq_path)
+            + load_notices(args.data_dir) + load_events(args.data_dir))
     index = build(docs, use_normalize=not args.no_normalize)
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
