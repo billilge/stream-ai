@@ -236,6 +236,9 @@ async def judge_rows(items: list[dict], concurrency: int = 3) -> dict[int, list[
         need = item["정답요지"]
         listed = "\n".join(f"{i}. {n}" for i, n in enumerate(need, 1))
         text = f"# 질문\n{item['질문']}\n\n# 정답요지\n{listed}\n\n# 답변\n{item['답변']}"
+        # 함정 문항은 왜 답할 수 없는지를 함께 준다. 판정 프롬프트 7번이 이것을 참고한다
+        if item.get("함정근거"):
+            text += f"\n\n# 함정근거\n{item['함정근거']}"
         async with sem:
             try:
                 # 응답 없이 멈추는 호출이 실제로 있었다. 하나 때문에 전체가 끝나지 않으면 안 되므로 끊는다.
@@ -260,11 +263,17 @@ async def judge_rows(items: list[dict], concurrency: int = 3) -> dict[int, list[
 
 
 def judge_answers(rows: list[dict], answers: dict) -> dict[int, list[bool] | None]:
-    """골든셋 답변 중 정답요지가 있는 문항만 골라 채점기에 넘긴다."""
+    """골든셋 답변 중 정답요지가 있는 문항만 골라 채점기에 넘긴다.
+
+    함정 문항도 넘긴다. 함정의 정답요지("답할 수 없다고 밝히기", "지어내지 않기")를 모두 충족하면
+    거절로 센다. 예전에는 거절 문구 목록(`REFUSAL`)으로만 셌는데, 그 목록이 Gemini 말투로 만들어져
+    다른 모델이 "공개할 수 없어요"처럼 제대로 거절해도 실패로 셌다(#61).
+    """
     items = [
-        {"id": r["id"], "질문": r["질문"], "정답요지": r["정답요지"], "답변": answers[r["id"]]}
+        {"id": r["id"], "질문": r["질문"], "정답요지": r["정답요지"], "답변": answers[r["id"]],
+         "함정근거": r.get("함정근거", "")}
         for r in rows
-        if not r.get("함정") and r.get("정답요지")
+        if r.get("정답요지")
         and r["id"] in answers and not answers[r["id"]].startswith("__ERROR__")
     ]
     print(f"LLM 채점 {len(items)}건...")
@@ -533,10 +542,26 @@ def summarize(rows: list[dict], answers: dict, recall: dict,
     "채점실패"로 따로 남긴다. 낱말 비교로 대신 세면 두 잣대가 섞인 숫자가 된다.
     """
     traps = [r for r in rows if r.get("함정")]
-    refused = sum(1 for r in traps if grade_answer(r, answers.get(r["id"], ""))["거절"])
+    violations, errors, judge_failed = [], [], []
+
+    # 함정 거절 판정. LLM 채점기가 있으면 함정 정답요지를 모두 충족했는지로, 없으면 거절 문구 목록으로 센다.
+    # 채점기가 실패한 문항은 문구 목록으로 대신 세지 않는다. 두 잣대가 섞인 숫자가 되기 때문이다.
+    trap_judged = []
+    refused = 0
+    for r in traps:
+        ans = answers.get(r["id"], "")
+        if judged is not None and r.get("정답요지") and not ans.startswith("__ERROR__"):
+            met = judged.get(r["id"])
+            if met is None:
+                judge_failed.append(r["id"])
+                continue
+            ok = all(met)
+        else:
+            ok = grade_answer(r, ans)["거절"]
+        trap_judged.append(r["id"])
+        refused += ok
 
     by_src = defaultdict(lambda: {"문항": 0, "충족": 0, "요지": 0, "위반": 0})
-    violations, errors, judge_failed = [], [], []
     # 사람이 봐야 하는 금지. 자동 채점에서 뺀 것이므로 "0건"으로 조용히 사라지지 않게 센다.
     pending = [
         {"id": r["id"], "질문": r["질문"], "함정": bool(r.get("함정")), "판정": r["금지판정"]}
@@ -572,9 +597,9 @@ def summarize(rows: list[dict], answers: dict, recall: dict,
         "채점방식": "llm" if judged is not None else "rule",
         "recall@5": recall,
         "함정": {
-            "대상": len(traps),
+            "대상": len(trap_judged),
             "거절": refused,
-            "점수": round(refused / len(traps), 4) if traps else 0.0,
+            "점수": round(refused / len(trap_judged), 4) if trap_judged else 0.0,
         },
         "출처구분별": dict(by_src),
         "금지위반": violations,
