@@ -10,10 +10,9 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
-from google import genai
-from google.genai import types
 from pydantic import BaseModel, Field
 
+import llm
 from search import search
 from tools import TOOLS
 
@@ -21,13 +20,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# 모델명이 없으면 서버를 아예 띄우지 않는다.
-# 그냥 두면 서버는 정상으로 뜨고 요청이 들어올 때마다 실패해서 원인 찾기가 어렵다.
-MODEL = os.getenv("GEMINI_MODEL")
-if not MODEL:
-    raise RuntimeError(
-        "환경변수 GEMINI_MODEL이 없습니다. .env.example을 복사해 .env를 만드세요."
-    )
+# 모델 설정(LLM_MODEL, KMU_AI_API_KEY)은 llm.py가 읽고, 없으면 import 시점에 서버를 멈춘다.
 
 # 프롬프트는 코드에 문자열로 넣지 않고 파일에서 읽는다.
 # 비개발자가 말투를 고칠 수 있어야 하기 때문이다. 수정하면 서버를 다시 띄워야 반영된다.
@@ -42,13 +35,12 @@ ENV = os.getenv("ENV", "dev")
 # 이 값을 아는 쪽(백엔드)에서 온 요청만 처리한다. 학생 로그인 확인은 백엔드가 이미 끝냈다.
 INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "")
 if ENV == "prod" and not INTERNAL_TOKEN:
-    # 배포에서 빠뜨리면 누구나 우리 Gemini 비용으로 질문할 수 있다. 조용히 뜨지 않고 멈춘다.
+    # 배포에서 빠뜨리면 누구나 우리 LLM 비용으로 질문할 수 있다. 조용히 뜨지 않고 멈춘다.
     raise RuntimeError(
         "ENV=prod 인데 환경변수 INTERNAL_TOKEN이 없습니다. 백엔드와 같은 값을 넣으세요."
     )
 
 app = FastAPI()
-client = genai.Client()
 
 
 class Msg(BaseModel):
@@ -219,30 +211,22 @@ async def relay(req: Request, messages: list[Msg]):
         logger.info("검색 %d건 %s", len(docs), [d.get("meta", {}).get("문서ID") for d in docs])
         logger.debug("질문: %s", question)
 
-        contents = [
-            types.Content(role=m.role, parts=[types.Part(text=m.text)])
-            for m in messages
-        ]
         # 모델은 오늘이 며칠인지 모른다. 알려주지 않으면 유효기간이 지났는지 짐작으로 답한다.
-        # tools: 모델이 필요할 때 부를 수 있는 조회 함수(tools.py). SDK가 호출과 결과 전달을
-        # 알아서 처리하고, 스트림에는 최종 답변 글자만 나온다. 그래서 아래 말풍선 처리는 그대로다.
-        config = types.GenerateContentConfig(
-            system_instruction=build_system_instruction(docs),
-            tools=TOOLS,
-        )
-
-        stream = await client.aio.models.generate_content_stream(
-            model=MODEL,
-            contents=contents,
-            config=config,
+        # TOOLS: 모델이 필요할 때 부를 수 있는 조회 함수(tools.py). llm.py가 호출과 결과 전달을
+        # 알아서 처리하고, 여기에는 최종 답변 글자만 나온다. 그래서 아래 말풍선 처리는 그대로다.
+        stream = llm.stream_answer(
+            system=build_system_instruction(docs),
+            history=[m.model_dump() for m in messages],
+            functions=TOOLS,
         )
         splitter = BubbleSplitter()
-        async for chunk in stream:
+        async for text in stream:
             if await req.is_disconnected():
+                # 학생이 창을 닫았다. 게이트웨이 연결도 바로 닫아 남은 답변 생성 비용을 아낀다
+                await stream.aclose()
                 break
-            if chunk.text:
-                for event in splitter.feed(chunk.text):
-                    yield event
+            for event in splitter.feed(text):
+                yield event
         for event in splitter.flush():
             yield event
         yield sse("done", {})
