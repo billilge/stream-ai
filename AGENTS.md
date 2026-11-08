@@ -2,7 +2,8 @@
 
 AI 코딩 에이전트가 이 저장소에서 작업할 때 참고하는 가이드다.
 
-Python 3.10+ / FastAPI 기반 AI 챗봇 서버. LLM은 Gemini API(Google AI Studio), 검색은 RAG.
+Python 3.10+ / FastAPI 기반 AI 챗봇 서버. LLM은 학교 AI 게이트웨이(`ai.cs.kookmin.ac.kr`, OpenAI 호환)의 gpt-oss-120b, 검색은 RAG.
+모델 선정 근거는 `eval/model-comparison.md`. 평가 채점기는 Gemini를 그대로 쓴다.
 소융대 통합 플랫폼 Stream의 챗봇 파트이며, 백엔드(Spring)·프론트(React)와는 별도 저장소다.
 
 ## 작업 원칙
@@ -76,7 +77,7 @@ Python 3.10+ / FastAPI 기반 AI 챗봇 서버. LLM은 Gemini API(Google AI Stud
   → 프론트 (React + TypeScript + Vite)
   → 백엔드 (Spring Boot / app-api, STUDENT 역할, JWT)
   → AI 서버 (이 저장소, FastAPI)
-  → Gemini API
+  → 학교 AI 게이트웨이 (gpt-oss-120b)
 ```
 
 AI 서버는 인터넷에 직접 노출하지 않는다. 백엔드를 거친 요청만 처리한다.
@@ -137,7 +138,7 @@ chunk.py                  청킹 + 메타데이터
 build_index.py            인덱스 빌드
 search.py                 검색
 tools.py                  function calling 도구 (빌릴게 재고 등)
-llm.py                    Gemini 호출 래퍼
+llm.py                    LLM 호출 래퍼 (게이트웨이 스트리밍·도구 호출)
 app.py                    FastAPI 엔트리포인트
 eval.py                   평가 실행
 ```
@@ -258,6 +259,6 @@ ID로 하나 꺼내는 것은 DB가 잘하지만, 수백 건 중 관련된 것�
 
 되돌아오는 논의를 막기 위해 기록한다.
 
-- **자체 모델 서빙 / GPU 서버**: 사용하지 않는다. Gemini API 호출 구조로 확정했다. vLLM 등 모델을 직접 띄우는 코드는 이 저장소에 두지 않는다.
+- **자체 모델 서빙 / GPU 서버**: 사용하지 않는다. 외부 LLM API 호출 구조로 확정했다(지금은 학교 AI 게이트웨이). vLLM 등 모델을 직접 띄우는 코드는 이 저장소에 두지 않는다.
 - **LoRA 파인튜닝**: 계획에 없다. 학사 정보는 자주 바뀌므로 가중치에 지식을 넣으면 갱신이 불가능하고 옛 정보를 확신 있게 답하게 된다. 파인튜닝은 지식이 아니라 행동(말투·형식·거절)을 고치는 도구이며, 그 행동은 프롬프트로 먼저 시도한다.
 - **벡터 검색**: 보류. BM25 베이스라인을 먼저 세우고, 평가로 개선 폭을 확인한 뒤에만 도입한다.

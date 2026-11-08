@@ -34,7 +34,6 @@ docker run -d --name stream-ai-test \
   -p 127.0.0.1:8001:8000 \
   --env-file .env \
   -e ENV=prod \
-  -v "$HOME/.config/gcloud/application_default_credentials.json:/home/appuser/.config/gcloud/application_default_credentials.json:ro" \
   stream-ai
 ```
 
@@ -45,7 +44,6 @@ docker run -d --name stream-ai-test \
 | `-p 127.0.0.1:8001:8000` | 맥북의 8001을 컨테이너의 8000에 연결한다. **가운데가 맥북, 오른쪽이 컨테이너다.** 앞의 `127.0.0.1`을 빼면 안 된다 — 아래 참고 |
 | `--env-file .env` | 설정값을 파일로 넘긴다. `.env`는 이미지에 들어 있지 않다 |
 | `-e ENV=prod` | `.env`의 값을 덮어쓴다. `-e`가 `--env-file`보다 세다 |
-| `-v A:B:ro` | 맥북의 파일 A를 컨테이너의 B 위치에서 보이게 한다. `ro`는 읽기 전용 |
 
 로컬은 `8001`을 쓴다. 맥북에서 `uvicorn`을 직접 띄워 `8000`을 쓰고 있을 때 부딪히지 않게 하려는 것이다.
 
@@ -58,9 +56,9 @@ docker run -d --name stream-ai-test \
 0.0.0.0:8001->8000/tcp, [::]:8001->8000/tcp     ← 모든 곳에서 들어올 수 있다
 ```
 
-`POST /chat`에는 **아직 인증이 없다**(`X-Internal-Token` 미구현). 그리고 컨테이너에는
-구글 계정 로그인 정보가 마운트돼 있다. 둘이 겹치면, 같은 와이파이에 있는 누구든
-우리 서버에 질문을 던질 수 있고 **그 비용이 우리 GCP 프로젝트로 청구된다.**
+개발 설정(`INTERNAL_TOKEN` 비움)에서는 `POST /chat`에 인증이 없다. 그리고 컨테이너에는
+게이트웨이 키가 들어 있다. 둘이 겹치면, 같은 와이파이에 있는 누구든
+우리 서버에 질문을 던질 수 있고 **그 비용이 우리 게이트웨이 크레딧에서 빠진다.**
 
 `-p 127.0.0.1:8001:8000`은 "이 맥북 자신에게서 온 연결만 받는다"는 뜻이다.
 학교 와이파이에서 개발할 때 특히 중요하다.
@@ -69,20 +67,12 @@ docker run -d --name stream-ai-test \
 (빼면 컨테이너 밖에서 아무도 못 들어온다), 밖으로 노출하는 범위는 실행할 때 `-p`로 정한다.
 막는 지점이 다르다.
 
-### 인증 파일을 왜 마운트하나
+### 답변 모델 키
 
-`app.py`의 `genai.Client()`는 인자가 없다. `google-genai` SDK가 환경변수를 보고 Vertex로 붙고,
-로그인 정보는 `gcloud auth application-default login`이 맥북에 저장해둔 파일(ADC)에서 읽는다.
+서버는 학교 AI 게이트웨이를 불러 답을 만든다(#65). 키(`KMU_AI_API_KEY`)와 모델(`LLM_MODEL`)은
+`--env-file .env`로 넘어간다. 예전에는 Gemini 로그인 파일(gcloud ADC)을 마운트해야 했지만 지금 서버는 쓰지 않는다.
 
-그 파일은 `~/.config/gcloud/application_default_credentials.json`에 있고 **컨테이너 안에는 없다.**
-마운트하지 않으면 Vertex 403이 난다.
-
-이미지에 복사해 넣으면 안 된다. 그 파일은 곧 비밀번호이고, 이미지를 가진 사람이 모두 쓸 수 있게 된다.
-컨테이너 안 경로가 `/home/appuser/...`인 이유는 `Dockerfile`에서 `appuser`로 내려왔기 때문이다.
-SDK는 그 계정의 홈 폴더에서 파일을 찾는다.
-
-**이건 로컬 확인용이다.** 실제 배포에서는 이 방법을 쓰지 않는다. 4주차에 배포 환경의
-서비스 계정으로 바꾼다. 그러면 파일 자체가 필요 없어진다.
+키를 이미지에 넣으면 안 된다. 키는 곧 비밀번호이고, 이미지를 가진 사람이 모두 쓸 수 있게 된다.
 
 ## 확인
 
@@ -117,7 +107,7 @@ docker exec -it stream-ai-test sh # 컨테이너 안에 들어가기
 | 증상 | 원인 |
 | --- | --- |
 | 브라우저가 연결 거부 | `--host 0.0.0.0`이 빠졌다. 기본값은 컨테이너 자기 자신만 받는다 |
-| Vertex 403 | ADC 마운트가 빠졌거나 경로가 틀렸다. `docker logs`를 본다 |
+| 질문하면 `error`, 로그에 `401` | `.env`의 `KMU_AI_API_KEY`가 틀렸다. 값 끝에 다른 글자가 붙지 않았는지 본다 |
 | `docker logs`가 비어 있음 | `PYTHONUNBUFFERED=1`이 빠졌다. 파이썬이 로그를 모아두고 안 내보낸다 |
 | `ZoneInfoNotFoundError` | slim 이미지에 시간대 표가 없다. `tzdata`를 설치해야 한다 |
 | 이름이 이미 있다는 오류 | 멈춘 컨테이너가 남아 있다. `docker rm -f`로 지운다 |
@@ -127,5 +117,5 @@ docker exec -it stream-ai-test sh # 컨테이너 안에 들어가기
 
 ## 실제 배포
 
-`deploy.md`를 본다. 서버에서는 ADC 마운트 대신 서비스 계정을 쓰고, 포트를 밖으로 열지 않는다.
+`deploy.md`를 본다. 서버에서는 환경변수를 Coolify에 넣고, 포트를 밖으로 열지 않는다.
 `INTERNAL_TOKEN`을 넣으면 로컬 컨테이너도 헤더 검증을 한다(`.env.example` 참고).
