@@ -22,6 +22,9 @@ v1/v2를 비교할 때는 뒤의 둘로 판단한다.
     python eval.py --answers eval/run-v2.json   저장된 답변을 다시 채점만 한다 (답변 생성 없음)
     python eval.py --grader rule    예전 낱말 비교 채점 (지난 기록과 비교할 때만)
     python eval.py --calibrate      채점기를 기준 판정(eval/judge-labels.jsonl)과 비교한다
+    python eval.py --kmu-model claude-haiku-5-5 --out eval/kmu/claude-haiku-5-5.json
+                                    학교 AI 게이트웨이 모델로 답변을 만든다 (채점은 Gemini)
+    python eval.py --compare eval/kmu/*.json    모델별 점수표를 비교표로 출력한다
 """
 
 import argparse
@@ -344,6 +347,181 @@ async def answer_all(rows: list[dict], today: str, search_fn, concurrency: int =
     return out
 
 
+# ─────────────────────────────────────────────────────────────
+# 학교 AI 게이트웨이(ai.cs.kookmin.ac.kr) — 모델 비교용 (#61)
+# ─────────────────────────────────────────────────────────────
+# 게이트웨이는 OpenAI와 같은 요청 형식을 받는다. 그래서 모델 이름만 바꿔 여러 회사 모델을
+# 같은 코드로 부를 수 있다. 새 라이브러리를 들이지 않고 이미 설치된 httpx로 직접 부른다.
+# 서버(app.py)는 아직 Gemini를 쓰므로 이 경로는 평가에서만 쓴다. 모델을 고른 뒤 서버 교체는 따로 한다.
+KMU_AI_URL = "https://ai.cs.kookmin.ac.kr/v1/chat/completions"
+
+# 도구를 부르고 결과를 다시 넘기는 왕복의 최대 횟수. 모델이 같은 도구를 계속 부르며 멈추지 않는 것을 막는다.
+MAX_TOOL_ROUNDS = 3
+
+
+def _openai_tools(functions) -> list[dict]:
+    """`tools.TOOLS`의 파이썬 함수를 OpenAI 형식 도구 설명으로 바꾼다.
+
+    Gemini는 함수를 그대로 받아 설명을 알아서 만들지만 OpenAI 형식은 JSON으로 적어 줘야 한다.
+    손으로 따로 적으면 tools.py를 고칠 때 한쪽만 바뀌므로 함수의 설명(docstring)과 인자에서 만든다.
+    지금 도구의 인자는 모두 문자열이라 타입은 string으로 둔다.
+    """
+    import inspect
+
+    specs = []
+    for fn in functions:
+        params = inspect.signature(fn).parameters
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": fn.__name__,
+                "description": inspect.getdoc(fn) or "",
+                "parameters": {
+                    "type": "object",
+                    "properties": {name: {"type": "string"} for name in params},
+                    # 기본값이 없는 인자만 필수로 둔다
+                    "required": [n for n, p in params.items() if p.default is inspect.Parameter.empty],
+                },
+            },
+        })
+    return specs
+
+
+async def answer_all_kmu(rows: list[dict], today: str, search_fn, model: str,
+                         concurrency: int = 3) -> tuple[dict, dict]:
+    """`answer_all`과 같은 질문을 학교 게이트웨이 모델로 물어본다.
+
+    시스템 지시문·검색 문서·도구는 Gemini 경로와 똑같이 넘긴다. 다른 것은 모델뿐이어야
+    점수 차이를 모델 차이로 읽을 수 있다.
+    답변과 함께 문항별 응답 시간(초)과 토큰 수를 돌려준다. 모델을 고를 때 정확도만큼 중요하다.
+    """
+    import time
+
+    import httpx
+
+    import app
+
+    key = os.getenv("KMU_AI_API_KEY")
+    if not key:
+        sys.exit(".env에 KMU_AI_API_KEY가 없습니다.")
+    headers = {"Authorization": f"Bearer {key}"}
+    tool_specs = _openai_tools(app.TOOLS)
+    tool_fns = {fn.__name__: fn for fn in app.TOOLS}
+    sem = asyncio.Semaphore(concurrency)
+    out: dict[int, str] = {}
+    stats: dict[int, dict] = {}
+
+    async def one(client, row):
+        async with sem:
+            docs = search_fn(row["질문"], k=DEFAULT_K)
+            messages = [
+                {"role": "system", "content": app.build_system_instruction(docs, today=today)},
+                {"role": "user", "content": row["질문"]},
+            ]
+            started = time.monotonic()
+            tokens_in = tokens_out = 0
+            try:
+                for _ in range(MAX_TOOL_ROUNDS + 1):
+                    resp = await client.post(KMU_AI_URL, headers=headers, json={
+                        "model": model, "messages": messages, "tools": tool_specs,
+                    })
+                    resp.raise_for_status()
+                    data = resp.json()
+                    usage = data.get("usage") or {}
+                    tokens_in += usage.get("prompt_tokens") or 0
+                    tokens_out += usage.get("completion_tokens") or 0
+                    msg = data["choices"][0]["message"]
+                    calls = msg.get("tool_calls") or []
+                    if not calls:
+                        out[row["id"]] = (msg.get("content") or "").strip()
+                        break
+                    # 모델이 도구를 불렀다. 실제로 실행해 결과를 붙이고 다시 묻는다
+                    messages.append(msg)
+                    for call in calls:
+                        fn = tool_fns.get(call["function"]["name"])
+                        args = json.loads(call["function"].get("arguments") or "{}")
+                        result = fn(**args) if fn else {"오류": "없는 도구입니다."}
+                        messages.append({"role": "tool", "tool_call_id": call["id"],
+                                         "content": json.dumps(result, ensure_ascii=False)})
+                else:
+                    out[row["id"]] = "__ERROR__ 도구 호출이 끝나지 않았습니다."
+            except Exception as exc:  # 한 문항이 실패해도 전체를 멈추지 않는다
+                detail = exc.response.text[:200] if isinstance(exc, httpx.HTTPStatusError) else exc
+                out[row["id"]] = f"__ERROR__ {type(exc).__name__}: {detail}"
+            stats[row["id"]] = {"초": round(time.monotonic() - started, 2),
+                                "입력토큰": tokens_in, "출력토큰": tokens_out}
+
+    # 생각(reasoning)을 길게 하는 모델이 있어 넉넉히 기다린다
+    async with httpx.AsyncClient(timeout=120) as client:
+        await asyncio.gather(*(one(client, r) for r in rows))
+    return out, stats
+
+
+def summarize_stats(stats: dict) -> dict:
+    """문항별 시간·토큰을 모델 비교표에 쓸 숫자로 줄인다."""
+    if not stats:
+        return {}
+    secs = sorted(s["초"] for s in stats.values())
+    return {
+        "평균초": round(sum(secs) / len(secs), 2),
+        # 느린 문항 몇 개가 체감을 좌우한다. 평균만 보면 가려진다
+        "상위10%초": secs[int(len(secs) * 0.9)],
+        "입력토큰합": sum(s["입력토큰"] for s in stats.values()),
+        "출력토큰합": sum(s["출력토큰"] for s in stats.values()),
+    }
+
+
+# 비교표에서 `출처구분`을 "챗봇이 하는 일" 이름으로 보여준다. 발표에서 모델별로 무엇을 잘하는지 읽히게 하려고
+# 이름만 바꾼다. 묶는 기준은 골든셋의 `출처구분`(AGENTS.md 데이터 분류) 그대로다.
+TASK_LABELS = {
+    "문서형": "문서 답변 (검색)",
+    "실시간": "실시간 조회 (도구 호출)",
+    "문서형+실시간": "복합 질문 (검색+도구)",
+    "학교공식": "학교 공식 안내 (링크)",
+}
+
+
+def compare(paths: list[str]) -> None:
+    """저장된 점수표 여러 개를 모델 비교표(마크다운)로 출력한다. LLM을 부르지 않는다.
+
+    모델마다 `--out`으로 남긴 JSON을 넘긴다. 칸 하나가 모델 하나다.
+    문항 수가 적은 칸(7문항 등)은 한두 문항 차이로 크게 흔들리므로 문항 수를 같이 적는다.
+    """
+    runs = []
+    for p in paths:
+        d = json.loads(pathlib.Path(p).read_text(encoding="utf-8"))
+        # 게이트웨이 실행은 "모델"이 있고, Gemini 실행은 없어서 파일 이름으로 대신한다
+        runs.append((d.get("모델") or pathlib.Path(p).stem, d))
+
+    def pct(x):
+        return f"{x * 100:.0f}%" if x is not None else "-"
+
+    print("| 항목 | " + " | ".join(name for name, _ in runs) + " |")
+    print("| --- |" + " --- |" * len(runs))
+
+    for src, label in TASK_LABELS.items():
+        cells = []
+        n = None
+        for _, d in runs:
+            row = d["요약"].get("출처구분별", {}).get(src)
+            n = n or (row or {}).get("문항")
+            cells.append(pct(row["요지충족률"]) if row else "-")
+        print(f"| {label} 요지충족률 ({n}문항) | " + " | ".join(cells) + " |")
+
+    cells = [pct(d["요약"]["함정"]["점수"]) for _, d in runs]
+    n = runs[0][1]["요약"]["함정"]["대상"]
+    print(f"| 함정 거절률 — 모르면 모른다 ({n}문항) | " + " | ".join(cells) + " |")
+    print("| 금지 위반 (건) | " + " | ".join(str(len(d["요약"].get("금지위반", []))) for _, d in runs) + " |")
+    print("| 오류 (건) | " + " | ".join(str(len(d["요약"].get("오류", []))) for _, d in runs) + " |")
+
+    def stat(d, key):
+        v = (d.get("속도·토큰") or {}).get(key)
+        return "-" if v is None else f"{v:,}"
+
+    for key in ("평균초", "상위10%초", "입력토큰합", "출력토큰합"):
+        print(f"| {key} | " + " | ".join(stat(d, key) for _, d in runs) + " |")
+
+
 def summarize(rows: list[dict], answers: dict, recall: dict,
               judged: dict[int, list[bool] | None] | None = None) -> dict:
     """점수표를 만든다. 출처구분별로 나눠 낸다.
@@ -474,7 +652,15 @@ def main() -> None:
                     help="정답요지 채점 방식. rule은 예전 낱말 비교 (지난 기록과 비교할 때만)")
     ap.add_argument("--calibrate", action="store_true",
                     help="채점기를 기준 판정과 비교하고 끝낸다")
+    ap.add_argument("--kmu-model", default=None,
+                    help="학교 AI 게이트웨이 모델로 답변을 만든다 (예: claude-haiku-5-5). 채점은 그대로 Gemini")
+    ap.add_argument("--compare", nargs="+", default=None, metavar="JSON",
+                    help="저장된 점수표 여러 개를 모델 비교표로 출력하고 끝낸다")
     args = ap.parse_args()
+
+    if args.compare:
+        compare(args.compare)
+        return
 
     if args.calibrate:
         calibrate()
@@ -496,6 +682,7 @@ def main() -> None:
     recall = recall_at_k(rows, args.k, search_fn)
 
     answers = {}
+    stats = {}
     if args.answers:
         saved = json.loads(pathlib.Path(args.answers).read_text(encoding="utf-8"))
         answers = {int(k): v for k, v in saved.get("답변", {}).items()}
@@ -503,8 +690,12 @@ def main() -> None:
     elif not args.no_llm:
         if today is None:
             sys.exit("골든셋 메타에 기준시각이 없습니다. 상대 날짜 질문을 재현할 수 없습니다.")
-        print(f"LLM 호출 {len(rows)}건... (기준시각 {today})")
-        answers = asyncio.run(answer_all(rows, today, search_fn))
+        if args.kmu_model:
+            print(f"게이트웨이 {args.kmu_model} 호출 {len(rows)}건... (기준시각 {today})")
+            answers, stats = asyncio.run(answer_all_kmu(rows, today, search_fn, args.kmu_model))
+        else:
+            print(f"LLM 호출 {len(rows)}건... (기준시각 {today})")
+            answers = asyncio.run(answer_all(rows, today, search_fn))
 
     judged = None
     if answers and args.grader == "llm":
@@ -515,6 +706,10 @@ def main() -> None:
 
     if args.out:
         payload = {"메타": meta, "프롬프트": args.prompt or "현재", "요약": summary}
+        if args.kmu_model:
+            payload["모델"] = args.kmu_model
+            payload["속도·토큰"] = summarize_stats(stats)
+            payload["문항별속도"] = stats
         if answers:
             payload["답변"] = answers
         pathlib.Path(args.out).parent.mkdir(parents=True, exist_ok=True)
