@@ -12,15 +12,41 @@ AGENTS.md "데이터 분류" 참고.
 """
 
 import logging
+import os
+from contextvars import ContextVar
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import httpx
+from dotenv import load_dotenv
+
+load_dotenv()
+
 logger = logging.getLogger(__name__)
+
+# ─────────────────────────────────────────────────────────────
+# 백엔드 연결 (#69)
+# ─────────────────────────────────────────────────────────────
+# 백엔드 주소. 배포에서는 같은 도커 네트워크 안의 내부 주소를 넣는다(예: http://<백엔드 컨테이너 이름>:8080).
+# 비어 있으면 아래 가짜 응답을 쓴다. 로컬 개발과 평가(eval.py)는 학생 토큰이 없어서 가짜 응답으로 돈다.
+BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "").rstrip("/")
+if os.getenv("ENV", "dev") == "prod" and not BACKEND_BASE_URL:
+    # 배포에서 빠뜨리면 학생에게 가짜 재고를 진짜처럼 보여주게 된다. 조용히 뜨지 않고 멈춘다.
+    raise RuntimeError("ENV=prod 인데 환경변수 BACKEND_BASE_URL이 없습니다. 백엔드 내부 주소를 넣으세요.")
+
+# 백엔드가 느리면 답변 전체가 기다린다. 재고 하나 조회에 5초 넘게 걸리면 실패로 보고 안내 문구로 답한다.
+BACKEND_TIMEOUT_SECONDS = 5
+
+# 지금 질문한 학생의 JWT. app.py가 요청마다 넣고, 도구 함수 안에서만 꺼내 쓴다.
+# ContextVar: 요청마다 따로 보관되는 변수다. 여러 학생이 동시에 질문해도 서로의 토큰이 섞이지 않는다.
+# 함수 인자로 받지 않는 이유: 인자는 모델이 채운다. 모델이 토큰을 보면 답변으로 샐 수 있고, 다른 값을 넣을 수도 있다.
+# 이 토큰은 학생의 쓰기 권한까지 갖고 있다. 그래서 이 파일에는 조회(GET) 도구만 둔다(로드맵 「학생 토큰 전달」).
+user_token: ContextVar[str | None] = ContextVar("user_token", default=None)
 
 TYPE_LABELS = {"RENTAL": "대여품", "CONSUMABLE": "소모품"}
 
 # ─────────────────────────────────────────────────────────────
-# 가짜 응답 — 백엔드 AI 서버 전용 재고 API가 생기기 전까지 쓴다
+# 가짜 응답 — 백엔드 주소가 없을 때(로컬 개발·평가) 쓴다
 # ─────────────────────────────────────────────────────────────
 # 모양은 stream-server의 `GET /v1/app/billilge/items` 실제 응답과 같다
 # (ApiResponse → CursorSliceResponse → ItemListItemResponse).
@@ -28,7 +54,7 @@ TYPE_LABELS = {"RENTAL": "대여품", "CONSUMABLE": "소모품"}
 #
 # 품목과 수량은 test_data/billilge.json(골든셋 기준 데이터)과 맞췄다.
 # 그 파일은 예전 빌릴게 백엔드 모양(itemName, itemType)이라 직접 읽지 않는다.
-# 학생 앱 API는 학생 로그인(JWT)이 있어야 해서 AI 서버가 부를 수 없다. 내부 API가 따로 필요하다.
+# 학생 앱 API는 학생 로그인(JWT)이 있어야 한다. 그래서 백엔드가 중계할 때 학생 JWT를 같이 넘겨 준다(#69).
 _FAKE_RESPONSE = {
     "success": True,
     "code": "SUCCESS",
@@ -50,12 +76,28 @@ _FAKE_RESPONSE = {
 
 
 def _fetch_items() -> list[dict]:
-    """백엔드에서 물품 목록을 받아 온다. 지금은 가짜 응답을 돌려준다.
+    """백엔드에서 물품 목록을 받아 온다. 백엔드 주소가 없으면 가짜 응답을 돌려준다.
 
-    실제 API로 바꿀 때 이 함수만 고친다(#50). 백엔드 목록은 이름순이고 한 번에 최대 100개다.
-    품목이 100개를 넘을 일은 당분간 없으므로 첫 페이지만 받는다.
+    학생 앱이 쓰는 `GET /v1/app/billilge/items`를 그 학생의 JWT로 부른다.
+    백엔드 목록은 이름순이고 한 번에 최대 100개다. 품목이 100개를 넘을 일은 당분간 없으므로 첫 페이지만 받는다.
+
+    실패하면 예외를 던진다. 부르는 쪽(`get_item_stock`)이 잡아서 "확인할 수 없다"는 안내로 바꾼다.
     """
-    response = _FAKE_RESPONSE
+    if not BACKEND_BASE_URL:
+        response = _FAKE_RESPONSE
+    else:
+        token = user_token.get()
+        if not token:
+            raise RuntimeError("학생 토큰(X-User-Token)이 없어 재고를 조회할 수 없습니다")
+        # 토큰은 로그에 남기지 않는다. 예외 메시지에도 주소만 들어가고 헤더는 들어가지 않는다.
+        r = httpx.get(
+            f"{BACKEND_BASE_URL}/v1/app/billilge/items",
+            params={"size": 100},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=BACKEND_TIMEOUT_SECONDS,
+        )
+        r.raise_for_status()
+        response = r.json()
     if not response["success"]:
         raise RuntimeError(f"재고 API 실패: {response['code']}")
     return response["data"]["content"]
