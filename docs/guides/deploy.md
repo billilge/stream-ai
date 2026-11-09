@@ -73,6 +73,17 @@ curl -s -o /dev/null -w "%{http_code}\n" https://ai.cs.kookmin.ac.kr/v1/models
 | `STREAM_AI_BASE_URL` | `http://<Coolify가 정한 AI 서버 컨테이너 이름>:8000` |
 | `STREAM_AI_INTERNAL_TOKEN` | 2번의 `INTERNAL_TOKEN`과 같은 값 |
 
+### 5. 인덱스 주기 갱신
+
+공지·행사·아카이빙·열린피드백은 서버 안에서 **10분마다** 백엔드 내부 API(`/v1/ai/**`, stream-server #312)에서 다시 받아 검색 인덱스를 바꿔 끼운다(`refresh.py`, #72).
+이미지를 다시 빌드하는 게 아니다. 컨테이너 안 `index/` 폴더에 파일만 새로 쓴다.
+
+- `BACKEND_BASE_URL`과 `INTERNAL_TOKEN`이 있으면 자동으로 켜진다. 둘 중 하나라도 없으면 꺼지고 이미지 빌드 때 만든 인덱스(시드 문서)로 답한다
+- 백엔드는 같은 `INTERNAL_TOKEN` 값(백엔드 쪽 `STREAM_AI_INTERNAL_TOKEN`)으로 `/v1/ai/**`를 확인한다. 새 비밀값은 없다
+- 주기를 바꾸려면 `INDEX_REFRESH_SECONDS`(기본 600)를 넣는다
+- 재배포·재시작하면 컨테이너 안 인덱스가 사라지지만, 켜지자마자 1회 돌아 몇 초 안에 최신으로 돌아온다
+- 갱신이 실패하거나 받은 문서가 0건·절반 아래로 줄면 **기존 인덱스를 그대로 쓴다**
+
 ## 배포 후 확인
 
 1. Coolify 로그에 `Uvicorn running on http://0.0.0.0:8000`이 보인다
@@ -92,6 +103,16 @@ curl -s -o /dev/null -w "%{http_code}\n" https://ai.cs.kookmin.ac.kr/v1/models
 | 백엔드 로그에 `status=401` | 양쪽 토큰이 다르다 |
 | 백엔드 로그에 연결 실패 | 같은 네트워크가 아니거나 `STREAM_AI_BASE_URL`의 컨테이너 이름이 틀렸다 |
 | Coolify 빌드 실패 | Coolify 빌드 로그를 본다. 로컬에서 `docker build .`가 되는지 먼저 확인한다 |
+
+## 인덱스 갱신 막히는 곳
+
+| 증상 | 원인 |
+| --- | --- |
+| 로그에 `인덱스 주기 갱신 꺼짐` | `BACKEND_BASE_URL` 또는 `INTERNAL_TOKEN`이 없다 |
+| 로그에 `인덱스 갱신 실패` + `401` | 백엔드 `STREAM_AI_INTERNAL_TOKEN`과 AI 서버 `INTERNAL_TOKEN`이 다르다 |
+| 로그에 `인덱스 갱신 실패` + `404` | 백엔드에 #312(`/v1/ai/**`)가 아직 배포되지 않았다 |
+| 로그에 `인덱스 갱신 건너뜀: ... 크게 줄었습니다` | 받은 문서가 직전의 절반 아래다. 백엔드 오류인지, 실제로 많이 지웠는지 확인한다. 실제로 지운 거라면 서버를 재시작하면 새 기준으로 받아들인다 |
+| 새 공지를 올렸는데 10분이 지나도 모름 | 위 로그를 본다. 갱신 성공 로그는 INFO라 지금 로깅 설정으로는 보이지 않는다 |
 
 ## 되돌리기
 
