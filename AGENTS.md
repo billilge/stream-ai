@@ -133,7 +133,8 @@ prompts/
 └── system_v2.md          현재 시스템 프롬프트 (코드 하드코딩 금지)
 eval/
 └── golden.jsonl          평가 골든셋
-sync.py                   백엔드 공지·행사 동기화
+sync.py                   백엔드 공지·행사·아카이빙·열린피드백 동기화 (내부 API /v1/ai/**)
+refresh.py                서버 안 주기 인덱스 갱신 (동기화 → 빌드 → 검사 → 교체)
 chunk.py                  청킹 + 메타데이터
 build_index.py            인덱스 빌드
 search.py                 검색
@@ -243,7 +244,7 @@ ID로 하나 꺼내는 것은 DB가 잘하지만, 수백 건 중 관련된 것�
 - 백엔드와 같은 내부망에 둔다. 인터넷에 직접 노출하지 않는다.
 - `INTERNAL_TOKEN`을 백엔드의 `STREAM_AI_INTERNAL_TOKEN`과 같은 값으로 넣는다. `ENV=prod`인데 비어 있으면 서버가 뜨지 않는다.
 - `.env`는 서버에서 직접 만든다. 저장소에 올리지 않는다.
-- 인덱스 갱신 스케줄을 건다. 갱신이 멈추면 공지 수정이 반영되지 않는다.
+- 인덱스 갱신은 서버 안에서 10분마다 자동으로 돈다(`refresh.py`). `BACKEND_BASE_URL`과 `INTERNAL_TOKEN`이 없으면 꺼진다. 꺼지면 공지 수정이 반영되지 않는다.
 
 ## Git 컨벤션
 

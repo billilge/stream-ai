@@ -1,7 +1,9 @@
+import asyncio
 import json
 import logging
 import os
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -13,6 +15,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 import llm
+import refresh
+import sync
 from search import search
 from tools import TOOLS
 
@@ -40,7 +44,22 @@ if ENV == "prod" and not INTERNAL_TOKEN:
         "ENV=prod 인데 환경변수 INTERNAL_TOKEN이 없습니다. 백엔드와 같은 값을 넣으세요."
     )
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """서버가 켜질 때 인덱스 주기 갱신을 띄우고, 꺼질 때 멈춘다(refresh.py 참고).
+
+    lifespan: 서버가 켜질 때와 꺼질 때 한 번씩 실행되는 자리. `yield` 앞이 켜질 때, 뒤가 꺼질 때다.
+    백엔드 주소나 내부 토큰이 없으면(로컬 개발·평가) 갱신을 켜지 않고 이미지에 든 인덱스로 답한다.
+    """
+    task = asyncio.create_task(refresh.run_forever()) if sync.is_configured() else None
+    if task is None:
+        logger.warning("인덱스 주기 갱신 꺼짐: BACKEND_BASE_URL 또는 INTERNAL_TOKEN이 없습니다. 빌드 때 만든 인덱스로 답합니다")
+    yield
+    if task is not None:
+        task.cancel()
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 class Msg(BaseModel):
