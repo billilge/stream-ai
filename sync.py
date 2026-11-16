@@ -10,6 +10,10 @@
 `{"text": 본문, "meta": {문서ID, 출처URL, 제목, 게시일, 유효기간, 문서유형}}`
 문서ID 접두어(notice-, event-, archive-, feedback-)도 같게 맞췄다. 골든셋의 근거문서ID를 다시 맞출 때 이 이름을 쓴다.
 
+출처URL은 공지·행사에만 넣는다(#81). Stream 웹의 상세 화면 경로(`/notices/11`, `/events/3`)이고,
+챗봇이 답변 끝에 이 주소로 링크를 붙인다. 아카이빙·열린피드백은 출처 줄 자체를 붙이지 않기로 해서 비워 둔다.
+주소 앞부분(도메인)은 넣지 않는다. 프론트가 같은 사이트 안 이동으로 처리하고, dev·운영 주소가 달라도 그대로 쓸 수 있다.
+
 담당: AGENTS.md상 승빈 담당 파일이다. 내부 API 연결은 이상현이 먼저 만들었다(2026-11-09 합의).
 """
 
@@ -65,7 +69,7 @@ def _notice(n: dict) -> dict:
     return {"text": n["content"], "meta": {
         "문서ID": f"notice-{n['noticeId']}", "제목": n["title"],
         "게시일": _date(n.get("createdAt")), "유효기간": "",
-        "출처URL": "", "문서유형": "공지"}}
+        "출처URL": f"/notices/{n['noticeId']}", "문서유형": "공지"}}
 
 
 def _event(e: dict) -> dict:
@@ -85,7 +89,7 @@ def _event(e: dict) -> dict:
         "문서ID": f"event-{e['eventId']}", "제목": e["title"],
         "게시일": _date(e.get("applyStartAt") or e.get("eventStartAt")),
         "유효기간": _date(e.get("eventEndAt")),
-        "출처URL": "", "문서유형": "행사"}}
+        "출처URL": f"/events/{e['eventId']}", "문서유형": "행사"}}
 
 
 def _archive(a: dict) -> dict:
