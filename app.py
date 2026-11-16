@@ -193,7 +193,8 @@ def build_context(docs: list[dict]) -> str:
             f"제목: {m.get('제목', '(제목 없음)')}\n"
             f"게시일: {m.get('게시일', '(알 수 없음)')}\n"
             f"유효기간: {m.get('유효기간') or '없음'}\n"
-            f"링크: {m.get('출처URL', '')}\n"
+            # 링크는 공지·행사에만 있다. 비어 있으면 "없음"으로 적어, 모델이 빈 링크로 출처 줄을 만들지 않게 한다(#81).
+            f"링크: {m.get('출처URL') or '없음'}\n"
             f"내용: {d.get('text', '')}"
         )
     return "\n\n".join(blocks)
