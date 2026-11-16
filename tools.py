@@ -279,5 +279,75 @@ def get_my_rentals() -> dict:
     return result
 
 
+# ─────────────────────────────────────────────────────────────
+# 내 사물함 (#79) — 개인별 데이터라 질문한 학생 본인 것만 조회한다
+# ─────────────────────────────────────────────────────────────
+LOCKER_STATUS_LABELS = {"ASSIGNED": "사용 중", "EXPIRED": "사용 기간 끝남"}
+
+# 가짜 응답. 모양은 `GET /v1/app/lockers/applications`의 data, `GET /v1/app/lockers/sections`의 data와 같다.
+# 위치는 골든셋 32번 정답요지와 맞췄다.
+_FAKE_LOCKER_APPLICATIONS = {"applications": [
+    {"lockerApplicationId": 5, "lockerPeriodId": 2, "lockerPeriodName": "2026-2학기 사물함",
+     "applicationStatus": "ASSIGNED", "appliedAt": "2026-09-01T10:03:00",
+     "usageStartDate": "2026-09-01", "usageEndDate": "2026-12-19",
+     "sectionId": 4, "lockerLabel": "17"},
+]}
+_FAKE_LOCKER_SECTIONS = {"sections": [
+    {"sectionId": 3, "section": "미래관 3층 A구역", "availableCount": 2, "totalCount": 40,
+     "availabilityStatus": "AVAILABLE", "hasMine": False},
+    {"sectionId": 4, "section": "미래관 4층 B구역", "availableCount": 8, "totalCount": 40,
+     "availabilityStatus": "AVAILABLE", "hasMine": True},
+]}
+
+
+def _fetch_my_lockers() -> tuple[list[dict], dict[int, str]]:
+    """학생 본인의 사물함 배정 목록과 {구역ID: 구역 이름}을 받아 온다. 실패하면 예외를 던진다.
+
+    배정 목록에는 구역 번호(sectionId)만 있고 "미래관 4층 B구역" 같은 이름이 없다.
+    이름은 그 회차의 구역 목록(`/lockers/sections`)에만 있어서 한 번 더 부른다. 위치를 묻는 질문이라 이름이 꼭 필요하다.
+    """
+    if not BACKEND_BASE_URL:
+        applications = _FAKE_LOCKER_APPLICATIONS["applications"]
+        return applications, {s["sectionId"]: s["section"] for s in _FAKE_LOCKER_SECTIONS["sections"]}
+
+    # 배정된 사물함이 없으면 백엔드가 data를 null로 준다.
+    applications = (_backend_get("/v1/app/lockers/applications") or {}).get("applications") or []
+    section_names = {}
+    for period_id in {a["lockerPeriodId"] for a in applications}:
+        sections = (_backend_get("/v1/app/lockers/sections", {"lockerPeriodId": period_id}) or {}).get("sections") or []
+        section_names.update({s["sectionId"]: s["section"] for s in sections})
+    return applications, section_names
+
+
+def get_my_locker() -> dict:
+    """질문한 학생 본인에게 배정된 사물함의 위치(구역·번호)와 사용 기간을 조회한다.
+
+    학생이 내 사물함이 어디인지, 몇 번인지, 언제까지 쓸 수 있는지, 사물함 신청이 됐는지 물을 때 부른다.
+    사물함 신청 방법이나 신청 기간 같은 안내는 이 함수가 아니라 참고 문서에 있다.
+    """
+    # 결과는 개인정보라 로그에 남기지 않는다. 불렸다는 사실만 남긴다.
+    logger.info("도구 호출: get_my_locker()")
+
+    try:
+        applications, section_names = _fetch_my_lockers()
+    except Exception:
+        logger.exception("내 사물함 조회 실패")
+        return {"조회성공": False, "안내": "지금 사물함 정보를 확인할 수 없어요. Stream 사물함 화면에서 확인해 주세요."}
+
+    if not applications:
+        return {"조회성공": True, "사물함": [], "안내": "배정된 사물함이 없어요."}
+
+    return {"조회성공": True, "사물함": [
+        {
+            "회차": a.get("lockerPeriodName"),
+            "구역": section_names.get(a.get("sectionId")),
+            "번호": a.get("lockerLabel"),
+            "상태": LOCKER_STATUS_LABELS.get(a.get("applicationStatus"), a.get("applicationStatus")),
+            "사용기간": f"{a.get('usageStartDate') or ''} ~ {a.get('usageEndDate') or ''}",
+        }
+        for a in applications
+    ]}
+
+
 # app.py가 모델에 넘기는 도구 목록. 새 도구를 만들면 여기에 추가한다.
-TOOLS = [get_item_stock, get_my_rentals]
+TOOLS = [get_item_stock, get_my_rentals, get_my_locker]
