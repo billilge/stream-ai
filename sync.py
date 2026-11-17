@@ -104,8 +104,16 @@ def _archive(a: dict) -> dict:
 
 
 def _feedback(f: dict) -> dict:
-    """질문 문장을 본문에 함께 넣는다. 학생이 묻는 말로도 검색되게 하려는 것이다(기존 로더와 같다)."""
-    return {"text": f"질문: {f['question']}\n답변: {f['answer']}", "meta": {
+    """질문 문장을 본문에 함께 넣는다. 학생이 묻는 말로도 검색되게 하려는 것이다(기존 로더와 같다).
+
+    회차도 본문에 적는다. 학생 앱이 열린피드백을 "2026년 2회차"처럼 회차 단위로 보여주므로, 챗봇도 같은 말로
+    어느 회차 답변인지 말할 수 있게 하려는 것이다. 메타데이터 칸은 정해진 것만 쓰므로 행사 날짜처럼 본문에 넣는다.
+    """
+    lines = [f"질문: {f['question']}", f"답변: {f['answer']}"]
+    # 백엔드가 회차를 주기 전 버전이어도 동기화가 멈추지 않게 없으면 줄을 빼기만 한다
+    if f.get("year") and f.get("round"):
+        lines.insert(0, f"회차: {f['year']}년 {f['round']}회차")
+    return {"text": "\n".join(lines), "meta": {
         "문서ID": f"feedback-{f['feedbackId']}", "제목": f["question"],
         "게시일": _date(f.get("answeredAt")), "유효기간": "",
         "출처URL": "", "문서유형": "열린피드백"}}
