@@ -158,6 +158,17 @@ def _index() -> dict:
     return _INDEX
 
 
+def use_index(path: str) -> None:
+    """검색에 쓸 인덱스를 다른 파일로 바꿔 끼운다. `refresh.py`가 새 인덱스를 만든 뒤 부른다.
+
+    새 파일을 끝까지 읽고 계산까지 마친 뒤에 한 번에 바꾼다. 그래서 바꾸는 도중에 들어온 질문도
+    옛 인덱스나 새 인덱스 중 하나로 온전히 검색된다. 반쯤 바뀐 인덱스를 보는 일은 없다.
+    파일이 깨져 읽다가 실패하면 예외가 나고 기존 인덱스는 그대로 남는다.
+    """
+    global _INDEX
+    _INDEX = load_index(path)
+
+
 def score(query: str, index: dict | None = None) -> list[tuple[int, float]]:
     """질문에 대한 청크별 BM25 점수를 (청크 위치, 점수)로 돌려준다.
 

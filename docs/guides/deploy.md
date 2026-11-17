@@ -39,10 +39,11 @@ Coolify 리소스의 Environment Variables에 넣는다. 저장소에는 올리�
 | `INTERNAL_TOKEN` | 새로 만든 값. 백엔드의 `STREAM_AI_INTERNAL_TOKEN`과 **같은 값** |
 | `LLM_MODEL` | `gpt-oss-120b` (모델 선정 근거: `eval/model-comparison.md`) |
 | `KMU_AI_API_KEY` | 학교 AI 게이트웨이 키. **실험용과 다른 운영 전용 키**를 쓴다 |
+| `BACKEND_BASE_URL` | `http://<Coolify가 정한 백엔드 컨테이너 이름>:8080`. 재고 같은 실시간 조회에 쓴다(#69) |
 
 토큰 만들기: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
 
-`ENV=prod`인데 `INTERNAL_TOKEN`이 비어 있으면 서버가 뜨지 않는다. `LLM_MODEL`이나 `KMU_AI_API_KEY`가 없어도 뜨지 않는다.
+`ENV=prod`인데 `INTERNAL_TOKEN`이 비어 있으면 서버가 뜨지 않는다. `LLM_MODEL`, `KMU_AI_API_KEY`, `BACKEND_BASE_URL`이 없어도 뜨지 않는다.
 일부러 그렇게 만들었다. 서버가 떠 있는데 질문마다 실패하는 것보다 원인을 찾기 쉽다.
 
 **main에 머지하면 바로 배포된다.** 새 환경변수가 필요한 변경은 환경변수를 먼저 넣고 머지한다.
@@ -73,6 +74,17 @@ curl -s -o /dev/null -w "%{http_code}\n" https://ai.cs.kookmin.ac.kr/v1/models
 | `STREAM_AI_BASE_URL` | `http://<Coolify가 정한 AI 서버 컨테이너 이름>:8000` |
 | `STREAM_AI_INTERNAL_TOKEN` | 2번의 `INTERNAL_TOKEN`과 같은 값 |
 
+### 5. 인덱스 주기 갱신
+
+공지·행사·아카이빙·열린피드백은 서버 안에서 **10분마다** 백엔드 내부 API(`/v1/ai/**`, stream-server #312)에서 다시 받아 검색 인덱스를 바꿔 끼운다(`refresh.py`, #72).
+이미지를 다시 빌드하는 게 아니다. 컨테이너 안 `index/` 폴더에 파일만 새로 쓴다.
+
+- `BACKEND_BASE_URL`과 `INTERNAL_TOKEN`이 있으면 자동으로 켜진다. 둘 중 하나라도 없으면 꺼지고 이미지 빌드 때 만든 인덱스(시드 문서)로 답한다
+- 백엔드는 같은 `INTERNAL_TOKEN` 값(백엔드 쪽 `STREAM_AI_INTERNAL_TOKEN`)으로 `/v1/ai/**`를 확인한다. 새 비밀값은 없다
+- 주기를 바꾸려면 `INDEX_REFRESH_SECONDS`(기본 600)를 넣는다
+- 재배포·재시작하면 컨테이너 안 인덱스가 사라지지만, 켜지자마자 1회 돌아 몇 초 안에 최신으로 돌아온다
+- 갱신이 실패하거나 받은 문서가 0건·절반 아래로 줄면 **기존 인덱스를 그대로 쓴다**
+
 ## 배포 후 확인
 
 1. Coolify 로그에 `Uvicorn running on http://0.0.0.0:8000`이 보인다
@@ -89,9 +101,21 @@ curl -s -o /dev/null -w "%{http_code}\n" https://ai.cs.kookmin.ac.kr/v1/models
 | 컨테이너가 바로 죽음, 로그에 `LLM_MODEL 또는 KMU_AI_API_KEY가 없습니다` | 2번 환경변수 누락 |
 | 질문하면 `error` 이벤트, 로그에 `401 Unauthorized` (`ai.cs.kookmin.ac.kr`) | 게이트웨이 키가 틀렸거나 막혔다. 값 끝에 다른 글자가 붙지 않았는지, 게이트웨이 관리 화면에서 키 상태·남은 크레딧을 본다 |
 | 질문하면 `error` 이벤트, 로그에 `ConnectError` 또는 시간 초과 | 3번. Coolify 서버에서 게이트웨이로 나가지 못한다 |
+| 컨테이너가 바로 죽음, 로그에 `BACKEND_BASE_URL이 없습니다` | 2번 환경변수 누락 |
+| 재고를 물으면 "확인할 수 없어요", 로그에 `재고 조회 실패` | `BACKEND_BASE_URL`이 틀렸거나, 백엔드가 학생 JWT(`X-User-Token`)를 넘기지 않는다(stream-server #309 배포 여부) |
 | 백엔드 로그에 `status=401` | 양쪽 토큰이 다르다 |
 | 백엔드 로그에 연결 실패 | 같은 네트워크가 아니거나 `STREAM_AI_BASE_URL`의 컨테이너 이름이 틀렸다 |
 | Coolify 빌드 실패 | Coolify 빌드 로그를 본다. 로컬에서 `docker build .`가 되는지 먼저 확인한다 |
+
+## 인덱스 갱신 막히는 곳
+
+| 증상 | 원인 |
+| --- | --- |
+| 로그에 `인덱스 주기 갱신 꺼짐` | `BACKEND_BASE_URL` 또는 `INTERNAL_TOKEN`이 없다 |
+| 로그에 `인덱스 갱신 실패` + `401` | 백엔드 `STREAM_AI_INTERNAL_TOKEN`과 AI 서버 `INTERNAL_TOKEN`이 다르다 |
+| 로그에 `인덱스 갱신 실패` + `404` | 백엔드에 #312(`/v1/ai/**`)가 아직 배포되지 않았다 |
+| 로그에 `인덱스 갱신 건너뜀: ... 크게 줄었습니다` | 받은 문서가 직전의 절반 아래다. 백엔드 오류인지, 실제로 많이 지웠는지 확인한다. 실제로 지운 거라면 서버를 재시작하면 새 기준으로 받아들인다 |
+| 새 공지를 올렸는데 10분이 지나도 모름 | 위 로그를 본다. 갱신 성공 로그는 INFO라 지금 로깅 설정으로는 보이지 않는다 |
 
 ## 되돌리기
 

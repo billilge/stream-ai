@@ -1,7 +1,9 @@
+import asyncio
 import json
 import logging
 import os
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -13,7 +15,10 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 import llm
+import refresh
+import sync
 from search import search
+import tools
 from tools import TOOLS
 
 load_dotenv()
@@ -40,7 +45,22 @@ if ENV == "prod" and not INTERNAL_TOKEN:
         "ENV=prod 인데 환경변수 INTERNAL_TOKEN이 없습니다. 백엔드와 같은 값을 넣으세요."
     )
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """서버가 켜질 때 인덱스 주기 갱신을 띄우고, 꺼질 때 멈춘다(refresh.py 참고).
+
+    lifespan: 서버가 켜질 때와 꺼질 때 한 번씩 실행되는 자리. `yield` 앞이 켜질 때, 뒤가 꺼질 때다.
+    백엔드 주소나 내부 토큰이 없으면(로컬 개발·평가) 갱신을 켜지 않고 이미지에 든 인덱스로 답한다.
+    """
+    task = asyncio.create_task(refresh.run_forever()) if sync.is_configured() else None
+    if task is None:
+        logger.warning("인덱스 주기 갱신 꺼짐: BACKEND_BASE_URL 또는 INTERNAL_TOKEN이 없습니다. 빌드 때 만든 인덱스로 답합니다")
+    yield
+    if task is not None:
+        task.cancel()
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 class Msg(BaseModel):
@@ -174,7 +194,8 @@ def build_context(docs: list[dict]) -> str:
             f"제목: {m.get('제목', '(제목 없음)')}\n"
             f"게시일: {m.get('게시일', '(알 수 없음)')}\n"
             f"유효기간: {m.get('유효기간') or '없음'}\n"
-            f"링크: {m.get('출처URL', '')}\n"
+            # 링크는 공지·행사에만 있다. 비어 있으면 "없음"으로 적어, 모델이 빈 링크로 출처 줄을 만들지 않게 한다(#81).
+            f"링크: {m.get('출처URL') or '없음'}\n"
             f"내용: {d.get('text', '')}"
         )
     return "\n\n".join(blocks)
@@ -199,7 +220,11 @@ def build_system_instruction(docs: list[dict], today: str | None = None) -> str:
     )
 
 
-async def relay(req: Request, messages: list[Msg]):
+async def relay(req: Request, messages: list[Msg], user_token: str | None):
+    # 학생 JWT를 이 요청 동안만 도구가 볼 수 있게 넣어 둔다(tools.user_token 설명 참고).
+    # 여기(스트림을 실제로 만드는 곳)에서 넣어야 도구가 호출될 때 같은 값이 보인다.
+    tools.user_token.set(user_token)
+
     # 검색부터 전부 try 안에서 한다.
     # StreamingResponse는 이 함수가 돌기 전에 이미 200과 헤더를 보냈기 때문에,
     # 여기서 밖으로 튀는 예외는 error 이벤트도 없이 연결만 끊는다. 클라이언트는 이유를 모른다.
@@ -238,11 +263,18 @@ async def relay(req: Request, messages: list[Msg]):
 
 
 @app.post("/chat")
-async def chat(req: Request, body: ChatReq, user_id: int | None = Depends(verify_backend)):
+async def chat(
+    req: Request,
+    body: ChatReq,
+    user_id: int | None = Depends(verify_backend),
+    x_user_token: str | None = Header(default=None),
+):
     # user_id는 아직 쓰지 않는다. 개인 데이터 조회 도구(#52)가 이 값으로만 조회한다.
     # 모델이 정한 값을 쓰면 다른 학생 정보를 물어 꺼낼 수 있기 때문이다.
+    # x_user_token: 백엔드가 넘겨준 학생 JWT. 도구가 백엔드 학생 API를 조회할 때 쓴다(#69).
+    # 검사는 백엔드가 이미 끝냈다. 여기서는 그대로 전달만 하고, 로그에 남기지 않는다.
     return StreamingResponse(
-        relay(req, body.messages),
+        relay(req, body.messages, x_user_token),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
