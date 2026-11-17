@@ -39,10 +39,11 @@ Coolify 리소스의 Environment Variables에 넣는다. 저장소에는 올리�
 | `INTERNAL_TOKEN` | 새로 만든 값. 백엔드의 `STREAM_AI_INTERNAL_TOKEN`과 **같은 값** |
 | `LLM_MODEL` | `gpt-oss-120b` (모델 선정 근거: `eval/model-comparison.md`) |
 | `KMU_AI_API_KEY` | 학교 AI 게이트웨이 키. **실험용과 다른 운영 전용 키**를 쓴다 |
+| `BACKEND_BASE_URL` | `http://<Coolify가 정한 백엔드 컨테이너 이름>:8080`. 재고 같은 실시간 조회에 쓴다(#69) |
 
 토큰 만들기: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
 
-`ENV=prod`인데 `INTERNAL_TOKEN`이 비어 있으면 서버가 뜨지 않는다. `LLM_MODEL`이나 `KMU_AI_API_KEY`가 없어도 뜨지 않는다.
+`ENV=prod`인데 `INTERNAL_TOKEN`이 비어 있으면 서버가 뜨지 않는다. `LLM_MODEL`, `KMU_AI_API_KEY`, `BACKEND_BASE_URL`이 없어도 뜨지 않는다.
 일부러 그렇게 만들었다. 서버가 떠 있는데 질문마다 실패하는 것보다 원인을 찾기 쉽다.
 
 **main에 머지하면 바로 배포된다.** 새 환경변수가 필요한 변경은 환경변수를 먼저 넣고 머지한다.
@@ -89,6 +90,8 @@ curl -s -o /dev/null -w "%{http_code}\n" https://ai.cs.kookmin.ac.kr/v1/models
 | 컨테이너가 바로 죽음, 로그에 `LLM_MODEL 또는 KMU_AI_API_KEY가 없습니다` | 2번 환경변수 누락 |
 | 질문하면 `error` 이벤트, 로그에 `401 Unauthorized` (`ai.cs.kookmin.ac.kr`) | 게이트웨이 키가 틀렸거나 막혔다. 값 끝에 다른 글자가 붙지 않았는지, 게이트웨이 관리 화면에서 키 상태·남은 크레딧을 본다 |
 | 질문하면 `error` 이벤트, 로그에 `ConnectError` 또는 시간 초과 | 3번. Coolify 서버에서 게이트웨이로 나가지 못한다 |
+| 컨테이너가 바로 죽음, 로그에 `BACKEND_BASE_URL이 없습니다` | 2번 환경변수 누락 |
+| 재고를 물으면 "확인할 수 없어요", 로그에 `재고 조회 실패` | `BACKEND_BASE_URL`이 틀렸거나, 백엔드가 학생 JWT(`X-User-Token`)를 넘기지 않는다(stream-server #309 배포 여부) |
 | 백엔드 로그에 `status=401` | 양쪽 토큰이 다르다 |
 | 백엔드 로그에 연결 실패 | 같은 네트워크가 아니거나 `STREAM_AI_BASE_URL`의 컨테이너 이름이 틀렸다 |
 | Coolify 빌드 실패 | Coolify 빌드 로그를 본다. 로컬에서 `docker build .`가 되는지 먼저 확인한다 |

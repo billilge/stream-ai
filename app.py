@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 import llm
 from search import search
+import tools
 from tools import TOOLS
 
 load_dotenv()
@@ -199,7 +200,11 @@ def build_system_instruction(docs: list[dict], today: str | None = None) -> str:
     )
 
 
-async def relay(req: Request, messages: list[Msg]):
+async def relay(req: Request, messages: list[Msg], user_token: str | None):
+    # 학생 JWT를 이 요청 동안만 도구가 볼 수 있게 넣어 둔다(tools.user_token 설명 참고).
+    # 여기(스트림을 실제로 만드는 곳)에서 넣어야 도구가 호출될 때 같은 값이 보인다.
+    tools.user_token.set(user_token)
+
     # 검색부터 전부 try 안에서 한다.
     # StreamingResponse는 이 함수가 돌기 전에 이미 200과 헤더를 보냈기 때문에,
     # 여기서 밖으로 튀는 예외는 error 이벤트도 없이 연결만 끊는다. 클라이언트는 이유를 모른다.
@@ -238,11 +243,18 @@ async def relay(req: Request, messages: list[Msg]):
 
 
 @app.post("/chat")
-async def chat(req: Request, body: ChatReq, user_id: int | None = Depends(verify_backend)):
+async def chat(
+    req: Request,
+    body: ChatReq,
+    user_id: int | None = Depends(verify_backend),
+    x_user_token: str | None = Header(default=None),
+):
     # user_id는 아직 쓰지 않는다. 개인 데이터 조회 도구(#52)가 이 값으로만 조회한다.
     # 모델이 정한 값을 쓰면 다른 학생 정보를 물어 꺼낼 수 있기 때문이다.
+    # x_user_token: 백엔드가 넘겨준 학생 JWT. 도구가 백엔드 학생 API를 조회할 때 쓴다(#69).
+    # 검사는 백엔드가 이미 끝냈다. 여기서는 그대로 전달만 하고, 로그에 남기지 않는다.
     return StreamingResponse(
-        relay(req, body.messages),
+        relay(req, body.messages, x_user_token),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
