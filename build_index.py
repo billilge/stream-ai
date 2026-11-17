@@ -200,10 +200,15 @@ def main() -> None:
     parser.add_argument("--out", default=OUT_PATH)
     parser.add_argument("--no-normalize", action="store_true",
                         help="인사말·맺음말 정규화를 끄고 빌드한다 (전후 비교용)")
+    parser.add_argument("--no-test-data", action="store_true",
+                        help="test_data/의 모의 공지·행사를 넣지 않고 시드 문서·FAQ만 넣는다 (배포 이미지용)")
     args = parser.parse_args()
 
-    docs = (load_seed(args.seed_dir) + load_faq(args.faq_path)
-            + load_notices(args.data_dir) + load_events(args.data_dir))
+    docs = load_seed(args.seed_dir) + load_faq(args.faq_path)
+    # 모의 공지·행사는 개발·평가용 가짜 데이터다. 골든셋이 이 데이터로 채점하므로 로컬에서는 기본으로 넣는다.
+    # 배포 이미지에 넣으면 챗봇이 가짜 공지를 진짜처럼 답한다(#85). 실제 공지·행사는 서버가 켜진 뒤 refresh.py가 받아 온다.
+    if not args.no_test_data:
+        docs += load_notices(args.data_dir) + load_events(args.data_dir)
     index = build(docs, use_normalize=not args.no_normalize)
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
