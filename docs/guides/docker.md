@@ -24,8 +24,10 @@ docker build -t stream-ai .
 - `-t stream-ai` — 이미지에 붙일 이름(tag)
 - `.` — `Dockerfile`이 있는 폴더. 이 폴더 내용이 빌드에 쓰인다(`.dockerignore`가 뺀 것은 제외)
 
-빌드 중 `python build_index.py`가 돌아 검색 인덱스를 이미지 안에 만든다.
+빌드 중 `python build_index.py --no-test-data`가 돌아 검색 인덱스를 이미지 안에 만든다.
 `index/bm25.json`은 저장소에 커밋되지 않으므로 여기서 만들어야 한다.
+이미지에는 시드 문서·FAQ만 넣고 개발용 모의 공지·행사(`test_data/`)는 넣지 않는다(#85).
+실제 공지·행사는 서버가 켜진 뒤 `refresh.py`가 백엔드에서 받아 온다.
 
 ## 실행
 
