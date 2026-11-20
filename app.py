@@ -2,9 +2,10 @@ import asyncio
 import json
 import logging
 import os
+import re
 import secrets
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -196,9 +197,47 @@ def build_context(docs: list[dict]) -> str:
             f"유효기간: {m.get('유효기간') or '없음'}\n"
             # 링크는 공지·행사에만 있다. 비어 있으면 "없음"으로 적어, 모델이 빈 링크로 출처 줄을 만들지 않게 한다(#81).
             f"링크: {m.get('출처URL') or '없음'}\n"
-            f"내용: {d.get('text', '')}"
+            f"내용: {add_weekdays(d.get('text', ''), m.get('게시일'))}"
         )
     return "\n\n".join(blocks)
+
+
+WEEKDAYS = "월화수목금토일"
+# "9월 30일", "2026년 9월 30일"을 찾는다. 바로 뒤에 "(화)"처럼 괄호가 이미 있으면 건드리지 않는다.
+DATE_IN_TEXT = re.compile(r"(?:(\d{4})년\s*)?(\d{1,2})월\s*(\d{1,2})일(?!\s*\()")
+
+
+def add_weekdays(text: str, posted: str | None) -> str:
+    """본문의 날짜 뒤에 요일을 붙인다. 예: "9월 30일" → "9월 30일(수)"
+
+    모델은 요일을 계산하다 자주 틀린다(9/30 수요일을 "목"이라고 답했다, #89).
+    프롬프트로 "요일을 계산하지 말라"고 해도 가끔 붙여서, 코드가 맞는 요일을 미리 적어 준다.
+
+    연도가 안 적힌 날짜는 게시일의 연도로 본다. 그렇게 잡은 날짜가 게시일보다 두 달 넘게 앞이면
+    다음 해로 본다(12월 공지에 나온 "1월 5일"은 다음 해 1월이다). 게시일을 모르면 연도가 적힌 날짜만 고친다.
+    2월 30일처럼 없는 날짜는 그대로 둔다.
+    """
+    try:
+        posted_date = date.fromisoformat((posted or "")[:10])
+    except ValueError:
+        posted_date = None
+
+    def replace(match: re.Match) -> str:
+        year_text, month, day = match.group(1), int(match.group(2)), int(match.group(3))
+        try:
+            if year_text:
+                found = date(int(year_text), month, day)
+            elif posted_date:
+                found = date(posted_date.year, month, day)
+                if found < posted_date - timedelta(days=60):
+                    found = date(posted_date.year + 1, month, day)
+            else:
+                return match.group(0)
+        except ValueError:
+            return match.group(0)
+        return f"{match.group(0)}({WEEKDAYS[found.weekday()]})"
+
+    return DATE_IN_TEXT.sub(replace, text)
 
 
 def build_system_instruction(docs: list[dict], today: str | None = None) -> str:
@@ -213,9 +252,11 @@ def build_system_instruction(docs: list[dict], today: str | None = None) -> str:
     """
     if today is None:
         today = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
+    # 오늘 요일도 코드가 적어 준다. "이번 주 금요일" 같은 질문에 모델이 요일을 계산하지 않게 한다
+    weekday = WEEKDAYS[date.fromisoformat(today).weekday()]
     return (
         f"{SYSTEM_PROMPT}\n\n"
-        f"오늘 날짜: {today}\n\n"
+        f"오늘 날짜: {today} ({weekday})\n\n"
         f"# 참고 문서\n\n{build_context(docs)}"
     )
 
