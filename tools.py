@@ -34,6 +34,10 @@ if os.getenv("ENV", "dev") == "prod" and not BACKEND_BASE_URL:
     # 배포에서 빠뜨리면 학생에게 가짜 재고를 진짜처럼 보여주게 된다. 조용히 뜨지 않고 멈춘다.
     raise RuntimeError("ENV=prod 인데 환경변수 BACKEND_BASE_URL이 없습니다. 백엔드 내부 주소를 넣으세요.")
 
+# 백엔드와 같은 내부 토큰. 재고처럼 학생마다 같은 값은 학생 JWT가 아니라 이 토큰으로 AI 서버용 내부 API(/v1/ai/**)를 부른다(#93).
+# 학생 JWT는 쓰기 권한까지 있어서, 본인 것만 봐야 하는 조회(내 대여·사물함)에만 쓴다.
+INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "")
+
 # 백엔드가 느리면 답변 전체가 기다린다. 재고 하나 조회에 5초 넘게 걸리면 실패로 보고 안내 문구로 답한다.
 BACKEND_TIMEOUT_SECONDS = 5
 
@@ -48,50 +52,56 @@ TYPE_LABELS = {"RENTAL": "대여품", "CONSUMABLE": "소모품"}
 # ─────────────────────────────────────────────────────────────
 # 가짜 응답 — 백엔드 주소가 없을 때(로컬 개발·평가) 쓴다
 # ─────────────────────────────────────────────────────────────
-# 모양은 stream-server의 `GET /v1/app/billilge/items` 실제 응답과 같다
-# (ApiResponse → CursorSliceResponse → ItemListItemResponse).
-# 그래서 실제 API가 생기면 `_fetch_items`만 HTTP 호출로 바꾸고 나머지는 그대로 둔다.
+# 모양은 stream-server의 `GET /v1/ai/billilge/items` 실제 응답과 같다
+# (ApiResponse → 물품 배열 → AiItemResponse). 학생 앱 목록과 필드 이름이 같고, 이미지와 커서가 없다.
 #
 # 품목과 수량은 test_data/billilge.json(골든셋 기준 데이터)과 맞췄다.
 # 그 파일은 예전 빌릴게 백엔드 모양(itemName, itemType)이라 직접 읽지 않는다.
-# 학생 앱 API는 학생 로그인(JWT)이 있어야 한다. 그래서 백엔드가 중계할 때 학생 JWT를 같이 넘겨 준다(#69).
 _FAKE_RESPONSE = {
     "success": True,
     "code": "SUCCESS",
     "message": "요청에 성공했습니다.",
-    "data": {
-        "content": [
-            {"itemId": 3, "name": "C타입 충전기", "category": "ELECTRONICS", "type": "RENTAL", "count": 7, "imageUrl": None, "returnPolicy": {"maxRentalDays": 3, "returnDeadline": "17:00"}},
-            {"itemId": 6, "name": "HDMI 케이블", "category": "ELECTRONICS", "type": "RENTAL", "count": 6, "imageUrl": None, "returnPolicy": {"maxRentalDays": 3, "returnDeadline": "17:00"}},
-            {"itemId": 5, "name": "공학용 계산기", "category": "ELECTRONICS", "type": "RENTAL", "count": 0, "imageUrl": None, "returnPolicy": {"maxRentalDays": 3, "returnDeadline": "17:00"}},
-            {"itemId": 7, "name": "노트북 거치대", "category": "ELECTRONICS", "type": "RENTAL", "count": 3, "imageUrl": None, "returnPolicy": {"maxRentalDays": 3, "returnDeadline": "17:00"}},
-            {"itemId": 4, "name": "멀티탭", "category": "ELECTRONICS", "type": "RENTAL", "count": 8, "imageUrl": None, "returnPolicy": {"maxRentalDays": 3, "returnDeadline": "17:00"}},
-            {"itemId": 2, "name": "보조배터리", "category": "ELECTRONICS", "type": "RENTAL", "count": 4, "imageUrl": None, "returnPolicy": {"maxRentalDays": 3, "returnDeadline": "17:00"}},
-            {"itemId": 1, "name": "우산", "category": "DAILY_SUPPLIES", "type": "RENTAL", "count": 22, "imageUrl": None, "returnPolicy": {"maxRentalDays": 3, "returnDeadline": "17:00"}},
-        ],
-        "hasNext": False,
-        "nextCursor": None,
-    },
+    "data": [
+        {"itemId": 3, "name": "C타입 충전기", "category": "ELECTRONICS", "type": "RENTAL", "count": 7, "returnPolicy": {"maxRentalDays": 3, "returnDeadline": "17:00"}},
+        {"itemId": 6, "name": "HDMI 케이블", "category": "ELECTRONICS", "type": "RENTAL", "count": 6, "returnPolicy": {"maxRentalDays": 3, "returnDeadline": "17:00"}},
+        {"itemId": 5, "name": "공학용 계산기", "category": "ELECTRONICS", "type": "RENTAL", "count": 0, "returnPolicy": {"maxRentalDays": 3, "returnDeadline": "17:00"}},
+        {"itemId": 7, "name": "노트북 거치대", "category": "ELECTRONICS", "type": "RENTAL", "count": 3, "returnPolicy": {"maxRentalDays": 3, "returnDeadline": "17:00"}},
+        {"itemId": 4, "name": "멀티탭", "category": "ELECTRONICS", "type": "RENTAL", "count": 8, "returnPolicy": {"maxRentalDays": 3, "returnDeadline": "17:00"}},
+        {"itemId": 2, "name": "보조배터리", "category": "ELECTRONICS", "type": "RENTAL", "count": 4, "returnPolicy": {"maxRentalDays": 3, "returnDeadline": "17:00"}},
+        {"itemId": 1, "name": "우산", "category": "DAILY_SUPPLIES", "type": "RENTAL", "count": 22, "returnPolicy": {"maxRentalDays": 3, "returnDeadline": "17:00"}},
+    ],
 }
 
 
 def _fetch_items() -> list[dict]:
     """백엔드에서 물품 목록을 받아 온다. 백엔드 주소가 없으면 가짜 응답을 돌려준다.
 
-    학생 앱이 쓰는 `GET /v1/app/billilge/items`를 그 학생의 JWT로 부른다.
-    백엔드 목록은 이름순이고 한 번에 최대 100개다. 품목이 100개를 넘을 일은 당분간 없으므로 첫 페이지만 받는다.
+    AI 서버용 내부 API `GET /v1/ai/billilge/items`를 내부 토큰으로 부른다(#93).
+    재고는 학생마다 같은 값이라 학생 JWT가 필요 없다. 백엔드가 목록을 끝까지 모아 한 번에 내려준다.
 
     실패하면 예외를 던진다. 부르는 쪽(`get_item_stock`)이 잡아서 "확인할 수 없다"는 안내로 바꾼다.
     """
     if not BACKEND_BASE_URL:
-        return _FAKE_RESPONSE["data"]["content"]
-    return _backend_get("/v1/app/billilge/items", {"size": 100})["content"]
+        return _FAKE_RESPONSE["data"]
+    if not INTERNAL_TOKEN:
+        raise RuntimeError("INTERNAL_TOKEN이 없어 재고를 조회할 수 없습니다")
+    # 토큰은 로그에 남기지 않는다. 예외 메시지에도 주소만 들어간다.
+    r = httpx.get(
+        f"{BACKEND_BASE_URL}/v1/ai/billilge/items",
+        headers={"X-Internal-Token": INTERNAL_TOKEN},
+        timeout=BACKEND_TIMEOUT_SECONDS,
+    )
+    r.raise_for_status()
+    response = r.json()
+    if not response.get("success"):
+        raise RuntimeError(f"백엔드 API 실패: /v1/ai/billilge/items code={response.get('code')}")
+    return response.get("data") or []
 
 
 def _backend_get(path: str, params: dict | None = None):
     """학생 JWT로 백엔드 학생 앱 API 하나를 불러 응답의 `data`를 돌려준다. 실패하면 예외를 던진다.
 
-    재고·내 대여·내 사물함 도구가 모두 같은 방식으로 부르므로 한곳에 모았다(#79).
+    내 대여·내 사물함 도구가 같은 방식으로 부르므로 한곳에 모았다(#79). 재고는 내부 API로 따로 부른다(#93).
     백엔드 응답은 항상 `{"success": ..., "code": ..., "data": ...}` 모양이다(ApiResponse).
     `data`는 비어 있을 수 있다(예: 배정된 사물함이 없으면 null).
     """
