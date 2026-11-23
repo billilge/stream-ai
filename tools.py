@@ -142,7 +142,7 @@ def get_item_stock(item_name: str = "") -> dict:
         # 예외를 모델 쪽으로 올리지 않는다. 대신 "조회 실패"를 값으로 돌려줘서,
         # 모델이 수량을 지어내지 않고 확인할 수 없다고 답하게 한다.
         logger.exception("재고 조회 실패")
-        return {"조회성공": False, "안내": "지금 재고를 확인할 수 없어요. Stream 빌릴게 화면에서 확인해 주세요."}
+        return {"조회성공": False, "안내": "지금 재고를 확인할 수 없어요. stream 빌릴게 화면에서 확인해 주세요."}
 
     keyword = item_name.strip()
     # 백엔드 검색과 같은 방식(이름에 검색어가 들어 있으면 일치)이다. 띄어쓰기 차이는 무시한다.
@@ -257,7 +257,7 @@ def get_my_rentals() -> dict:
         histories, required = _fetch_my_rentals()
     except Exception:
         logger.exception("내 대여 조회 실패")
-        return {"조회성공": False, "안내": "지금 대여 내역을 확인할 수 없어요. Stream 빌릴게 화면의 내 대여에서 확인해 주세요."}
+        return {"조회성공": False, "안내": "지금 대여 내역을 확인할 수 없어요. stream 빌릴게 화면의 내 대여에서 확인해 주세요."}
 
     due_by_id = {r["rentalHistoryId"]: _to_datetime(r.get("dueAt")) for r in required}
 
@@ -342,7 +342,7 @@ def get_my_locker() -> dict:
         applications, section_names = _fetch_my_lockers()
     except Exception:
         logger.exception("내 사물함 조회 실패")
-        return {"조회성공": False, "안내": "지금 사물함 정보를 확인할 수 없어요. Stream 사물함 화면에서 확인해 주세요."}
+        return {"조회성공": False, "안내": "지금 사물함 정보를 확인할 수 없어요. stream 사물함 화면에서 확인해 주세요."}
 
     if not applications:
         return {"조회성공": True, "사물함": [], "안내": "배정된 사물함이 없어요."}
