@@ -102,7 +102,7 @@ GET /health
 
 POST /chat
   헤더: X-Internal-Token, X-User-Id   (토큰 불일치 401, 사용자 ID가 양의 정수가 아니면 400)
-        X-User-Token                  (학생 JWT. 도구가 백엔드 학생 API를 조회할 때만 쓴다. 없으면 실시간 조회가 "확인할 수 없음"으로 답한다)
+        X-User-Token                  (학생 JWT. 내 대여·사물함처럼 본인 것만 보는 도구가 백엔드 학생 API를 조회할 때만 쓴다. 없으면 그 조회가 "확인할 수 없음"으로 답한다. 재고는 내부 토큰으로 조회한다)
   본문: { "messages": [ { "role": "user" | "model", "text": str } ] }
   응답: SSE 스트림
 ```
