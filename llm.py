@@ -84,11 +84,32 @@ def _run_tool(functions: dict[str, Callable], name: str, arguments: str) -> str:
     if fn is None:
         return json.dumps({"오류": f"없는 도구입니다: {name}"}, ensure_ascii=False)
     try:
-        result = fn(**json.loads(arguments or "{}"))
+        result = fn(**_known_args(fn, name, arguments))
     except Exception:
         logger.exception("도구 실행 실패: %s", name)
         result = {"조회성공": False, "안내": "지금 확인할 수 없어요."}
     return json.dumps(result, ensure_ascii=False)
+
+
+def _known_args(fn: Callable, name: str, arguments: str) -> dict:
+    """모델이 보낸 인자 중 함수가 실제로 받는 것만 골라 돌려준다.
+
+    모델이 인자가 없는 도구(`get_my_locker()`)를 `{"": {}}`처럼 엉뚱한 인자로 부를 때가 있다(#99).
+    그대로 넘기면 TypeError로 조회 전체가 실패해 학생은 "확인할 수 없어요"만 보게 된다.
+    모르는 인자는 버리고 실행한다. 버린 인자의 이름만 로그에 남기고 값은 남기지 않는다(학생 질문이 섞일 수 있다).
+    """
+    try:
+        parsed = json.loads(arguments or "{}")
+    except json.JSONDecodeError:
+        parsed = {}
+    # 객체가 아니면(문자열·배열 등) 인자 없이 부른다
+    if not isinstance(parsed, dict):
+        parsed = {}
+    accepted = inspect.signature(fn).parameters
+    dropped = [key for key in parsed if key not in accepted]
+    if dropped:
+        logger.warning("도구 %s에 없는 인자를 버렸습니다: %s", name, dropped)
+    return {key: value for key, value in parsed.items() if key in accepted}
 
 
 async def _stream_once(client: httpx.AsyncClient, payload: dict) -> AsyncIterator[tuple[str, object]]:
