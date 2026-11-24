@@ -242,6 +242,14 @@ def _fmt(value: datetime | None) -> str | None:
     return value.strftime(f"%Y-%m-%d({weekday}) %H:%M")
 
 
+def _fmt_date(value: str | None) -> str:
+    """날짜만 있는 값('2026-12-01')에 요일을 붙인다('2026-12-01(화)'). 모델이 요일을 지어내지 않게 한다."""
+    if not value:
+        return ""
+    weekday = "월화수목금토일"[datetime.fromisoformat(value).weekday()]
+    return f"{value}({weekday})"
+
+
 def get_my_rentals() -> dict:
     """질문한 학생 본인이 빌렸거나 신청한 빌릴게 물품과 반납 기한을 조회한다.
 
@@ -353,7 +361,7 @@ def get_my_locker() -> dict:
             "구역": section_names.get(a.get("sectionId")),
             "번호": a.get("lockerLabel"),
             "상태": LOCKER_STATUS_LABELS.get(a.get("applicationStatus"), a.get("applicationStatus")),
-            "사용기간": f"{a.get('usageStartDate') or ''} ~ {a.get('usageEndDate') or ''}",
+            "사용기간": f"{_fmt_date(a.get('usageStartDate'))} ~ {_fmt_date(a.get('usageEndDate'))}",
         }
         for a in applications
     ]}
