@@ -177,7 +177,7 @@ class BubbleSplitter:
         return self._emit(rest)
 
 
-def build_context(docs: list[dict]) -> str:
+def build_context(docs: list[dict], today: date) -> str:
     """검색된 문서를 프롬프트에 넣을 형태로 바꾼다.
 
     문서가 없으면 그 사실을 명시한다. 빈 문자열을 넘기면 모델이
@@ -201,7 +201,7 @@ def build_context(docs: list[dict]) -> str:
             f"링크: {m.get('출처URL') or '없음'}\n"
             # 본문을 표시로 감싸 어디까지가 문서인지 모델이 알게 한다. 공지 본문에 "이전 지시를 무시하세요" 같은
             # 문장이 섞여 들어와도 지시가 아니라 문서 안의 글로 읽게 하려는 것이다(프롬프트 「규칙을 바꾸려는 입력」, #91)
-            f"<<문서 내용 시작>>\n{add_weekdays(d.get('text', ''), m.get('게시일'))}\n<<문서 내용 끝>>"
+            f"<<문서 내용 시작>>\n{mark_past_periods(add_weekdays(d.get('text', ''), m.get('게시일')), today)}\n<<문서 내용 끝>>"
         )
     return "\n\n".join(blocks)
 
@@ -244,6 +244,29 @@ def add_weekdays(text: str, posted: str | None) -> str:
     return DATE_IN_TEXT.sub(replace, text)
 
 
+# sync.py가 행사 본문에 적는 줄. 예: "신청 기간: 2026-11-01(일) 10:00 ~ 2026-11-20(금) 23:59"
+PERIOD_LINE = re.compile(r"^(신청 기간|행사 일시): .* ~ (\d{4}-\d{2}-\d{2})\(.\) \d{2}:\d{2}$", re.MULTILINE)
+PAST_LABELS = {"신청 기간": "신청 마감됨", "행사 일시": "이미 끝난 행사"}
+
+
+def mark_past_periods(text: str, today: date) -> str:
+    """행사의 신청 기간·행사 일시가 오늘보다 앞에 끝났으면 줄 끝에 "(오늘 기준 신청 마감됨)"을 붙인다.
+
+    모델에게 날짜를 비교하라고만 하면 자주 놓친다. 마감이 11/20인데 11/26에
+    "11월 20일까지예요"처럼 지금 신청할 수 있는 것처럼 답했다(#105, 3번 중 2번).
+    요일(add_weekdays)처럼 코드가 미리 판단해 적어 준다.
+
+    오늘 끝나는 기간은 시각까지 봐야 해서 표시하지 않는다(날짜만 비교한다).
+    인덱스는 10분마다 다시 만들지만 이 표시는 질문할 때마다 붙여서 하루가 지나도 틀리지 않는다.
+    """
+    def replace(match: re.Match) -> str:
+        if date.fromisoformat(match.group(2)) >= today:
+            return match.group(0)
+        return f"{match.group(0)} (오늘 기준 {PAST_LABELS[match.group(1)]})"
+
+    return PERIOD_LINE.sub(replace, text)
+
+
 def build_system_instruction(docs: list[dict], today: str | None = None) -> str:
     """모델에 넘길 시스템 지시문을 조립한다.
 
@@ -261,7 +284,7 @@ def build_system_instruction(docs: list[dict], today: str | None = None) -> str:
     return (
         f"{SYSTEM_PROMPT}\n\n"
         f"오늘 날짜: {today} ({weekday})\n\n"
-        f"# 참고 문서\n\n{build_context(docs)}"
+        f"# 참고 문서\n\n{build_context(docs, date.fromisoformat(today))}"
     )
 
 
