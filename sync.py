@@ -19,6 +19,7 @@
 
 import logging
 import os
+from datetime import datetime
 
 import httpx
 from dotenv import load_dotenv
@@ -47,8 +48,16 @@ def _date(value: str | None) -> str:
 
 
 def _datetime(value: str | None) -> str:
-    """'2026-11-20T14:00:00' → '2026-11-20 14:00'. 사람이 읽는 본문에 넣을 때 쓴다."""
-    return (value or "")[:16].replace("T", " ")
+    """'2026-12-11T17:00:00' → '2026-12-11(금) 17:00'. 사람이 읽는 본문에 넣을 때 쓴다.
+
+    요일을 여기서 붙인다. 모델은 요일을 직접 계산하지 않게 되어 있어서(프롬프트 「날짜 확인」),
+    요일이 없으면 "12월 11일(금)"처럼 답하지 못한다(#103).
+    """
+    if not value:
+        return ""
+    moment = datetime.fromisoformat(value[:19])
+    weekday = "월화수목금토일"[moment.weekday()]
+    return moment.strftime(f"%Y-%m-%d({weekday}) %H:%M")
 
 
 def _get(client: httpx.Client, path: str) -> list[dict]:
