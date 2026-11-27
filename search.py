@@ -91,8 +91,11 @@ def expand(tokens: list[str]) -> list[str]:
 
 # "최근", "요즘", "한달간"처럼 최신순을 묻는 말. BM25는 낱말이 겹치는 정도만 보므로
 # 이런 질문에서 최신 공지를 찾지 못한다. 날짜로 정렬해 주는 경로가 따로 필요하다.
-_RECENCY = re.compile(r"최근|최신|요즘|근래|새로\s*올라온|한\s*달|이번\s*주|며칠")
-# 날짜순으로 돌려줄 문서 종류. 행사·안내는 최신순이 의미가 없어 넣지 않는다.
+_RECENCY = re.compile(r"최근|최신|요즘|근래|새로\s*올라온|한\s*달|이번\s*(?:주|달)|며칠")
+# "지금 행사 뭐 있냐", "진행중인 행사"처럼 지금 있는 행사를 묻는 말. "행사"와 함께 나올 때만 본다.
+# 따로 두는 이유: "우산 지금 남았어"처럼 행사와 상관없는 질문까지 최신순 경로로 보내지 않으려고.
+_EVENT_NOW = re.compile(r"지금|현재|진행\s*중|예정")
+# 날짜순으로 돌려줄 문서 종류. 안내·자주 묻는 질문은 최신순이 의미가 없어 넣지 않는다.
 _DATED_TYPES = ("공지", "아카이빙")
 
 
@@ -101,12 +104,33 @@ def is_recency_query(query: str) -> bool:
     return bool(_RECENCY.search(query))
 
 
-def recent_chunks(index: dict, k: int) -> list[int]:
-    """게시일이 늦은 순으로 공지 청크 위치를 돌려준다."""
+def dated_types(query: str) -> tuple[str, ...]:
+    """날짜순으로 먼저 채울 문서 종류. 날짜순이 필요 없는 질문이면 빈 튜플.
+
+    "이번달 학생회 행사 잇어?"에서 행사 문서가 하나도 검색되지 않았다. 질문의 "학생회"가
+    안내 문서에 훨씬 많이 나와서 BM25 점수가 안내 문서로 몰렸고, 최신순 경로는 공지만 골랐다.
+    그래서 행사를 물으면 행사 문서를, 공지를 물으면(또는 종류를 안 밝히면) 공지를 날짜순으로 넣는다.
+    """
+    wants_event = "행사" in query
+    if not (is_recency_query(query) or (wants_event and _EVENT_NOW.search(query))):
+        return ()
+    if wants_event and "공지" not in query:
+        return ("행사",)
+    if wants_event:
+        # "한달간 공지랑 가까운 행사"처럼 둘 다 물으면 둘 다 넣는다
+        return _DATED_TYPES + ("행사",)
+    return _DATED_TYPES
+
+
+def recent_chunks(index: dict, k: int, types: tuple[str, ...] = _DATED_TYPES) -> list[int]:
+    """게시일이 늦은 순으로 `types` 종류 청크 위치를 돌려준다.
+
+    행사의 게시일은 신청 시작일(sync.py)이라, 행사는 신청을 늦게 연 것부터 나온다.
+    """
     dated = [
         (i, c["meta"].get("게시일", ""))
         for i, c in enumerate(index["chunks"])
-        if c["meta"].get("문서유형") in _DATED_TYPES and c["meta"].get("게시일")
+        if c["meta"].get("문서유형") in types and c["meta"].get("게시일")
     ]
     dated.sort(key=lambda x: x[1], reverse=True)
     return [i for i, _ in dated[:k]]
@@ -222,10 +246,11 @@ def search(query: str, k: int = DEFAULT_K, index: dict | None = None) -> list[di
     # "최근 공지" 류는 날짜순을 먼저 채우고 남은 자리를 BM25로 메운다. 둘을 합치는 이유는
     # "한달간 공지랑 가까운 행사"처럼 최신순과 내용 검색이 한 질문에 같이 오기 때문이다.
     ordered: list[tuple[int, float]] = []
-    if is_recency_query(query):
+    types = dated_types(query)
+    if types:
         # 날짜순이 상위를 다 차지하면 "한달간 공지랑 가까운 행사"에서 행사가 밀린다.
         # 절반만 날짜순으로 채우고 나머지는 내용 검색에 맡긴다.
-        ordered += [(i, 0.0) for i in recent_chunks(idx, (k + 1) // 2)]
+        ordered += [(i, 0.0) for i in recent_chunks(idx, (k + 1) // 2, types)]
     ordered += score(query, idx)
 
     for i, value in ordered:
