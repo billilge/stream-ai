@@ -128,6 +128,17 @@ def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+# 모델이 날짜에 "줄바꿈 안 되는" 하이픈·공백을 섞어 쓴다. 예: "2026‑12‑05(토) 23:59"(U+2011, U+202F).
+# 브라우저가 이런 문자로 이어진 날짜 전체를 한 단어로 봐서, 말풍선 폭을 넘어도 줄을 못 바꾸고 밖으로 삐져나온다(#107).
+# 화면에서는 보통 문자와 똑같이 보이므로 내보내기 전에 보통 하이픈·공백으로 바꾼다.
+NO_BREAK_CHARS = str.maketrans({
+    "\u2011": "-",  # NON-BREAKING HYPHEN
+    "\u00a0": " ",  # NO-BREAK SPACE
+    "\u202f": " ",  # NARROW NO-BREAK SPACE
+    "\u2007": " ",  # FIGURE SPACE
+})
+
+
 class BubbleSplitter:
     """스트리밍 텍스트를 문단(빈 줄) 단위 말풍선으로 나눈다.
 
@@ -157,7 +168,7 @@ class BubbleSplitter:
 
     def feed(self, text: str) -> list[str]:
         """모델이 보낸 조각을 받아 지금 내보낼 수 있는 SSE 이벤트를 돌려준다."""
-        self.buf += text
+        self.buf += text.translate(NO_BREAK_CHARS)
         events = []
         while "\n\n" in self.buf:
             para, self.buf = self.buf.split("\n\n", 1)
