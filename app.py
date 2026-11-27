@@ -212,7 +212,7 @@ def build_context(docs: list[dict], today: date) -> str:
             f"링크: {m.get('출처URL') or '없음'}\n"
             # 본문을 표시로 감싸 어디까지가 문서인지 모델이 알게 한다. 공지 본문에 "이전 지시를 무시하세요" 같은
             # 문장이 섞여 들어와도 지시가 아니라 문서 안의 글로 읽게 하려는 것이다(프롬프트 「규칙을 바꾸려는 입력」, #91)
-            f"<<문서 내용 시작>>\n{mark_past_periods(add_weekdays(d.get('text', ''), m.get('게시일')), today)}\n<<문서 내용 끝>>"
+            f"<<문서 내용 시작>>\n{mark_past_periods(add_weekdays(d.get('text', ''), m.get('게시일'), today), today)}\n<<문서 내용 끝>>"
         )
     return "\n\n".join(blocks)
 
@@ -222,7 +222,7 @@ WEEKDAYS = "월화수목금토일"
 DATE_IN_TEXT = re.compile(r"(?:(\d{4})년\s*)?(\d{1,2})월\s*(\d{1,2})일(?!\s*\()")
 
 
-def add_weekdays(text: str, posted: str | None) -> str:
+def add_weekdays(text: str, posted: str | None, today: date | None = None) -> str:
     """본문의 날짜 뒤에 요일을 붙인다. 예: "9월 30일" → "9월 30일(수)"
 
     모델은 요일을 계산하다 자주 틀린다(9/30 수요일을 "목"이라고 답했다, #89).
@@ -231,6 +231,10 @@ def add_weekdays(text: str, posted: str | None) -> str:
     연도가 안 적힌 날짜는 게시일의 연도로 본다. 그렇게 잡은 날짜가 게시일보다 두 달 넘게 앞이면
     다음 해로 본다(12월 공지에 나온 "1월 5일"은 다음 해 1월이다). 게시일을 모르면 연도가 적힌 날짜만 고친다.
     2월 30일처럼 없는 날짜는 그대로 둔다.
+
+    `today`를 넘기면 오늘보다 앞선 날짜에 "지난 날짜"도 함께 적는다. 예: "9월 8일" → "9월 8일(월, 지난 날짜)"
+    "최근 공지 뭐 있어"에 9월 사물함 신청·10월 간식행사 공지를 지금 일정처럼 소개했다.
+    행사의 기간 줄(mark_past_periods)과 같은 이유로, 공지 본문 날짜도 코드가 지났는지 미리 판단해 준다.
     """
     try:
         posted_date = date.fromisoformat((posted or "")[:10])
@@ -250,7 +254,8 @@ def add_weekdays(text: str, posted: str | None) -> str:
                 return match.group(0)
         except ValueError:
             return match.group(0)
-        return f"{match.group(0)}({WEEKDAYS[found.weekday()]})"
+        past = ", 지난 날짜" if today and found < today else ""
+        return f"{match.group(0)}({WEEKDAYS[found.weekday()]}{past})"
 
     return DATE_IN_TEXT.sub(replace, text)
 
